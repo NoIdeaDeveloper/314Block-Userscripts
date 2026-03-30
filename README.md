@@ -5,7 +5,7 @@ Welcome to the 314Block Userscripts collection! These scripts were designed to i
 ## Getting Started
 
 1. **Install wBlock**:
-   - Download and install the [wBlock app](https://apps.apple.com/us/app/wblock/id1529867649) from the App Store.
+   - Download and install the [wBlock app]([https://apps.apple.com/us/app/wblock/id1529867649](https://github.com/0xCUB3/wBlock) from the App Store.
    - Enable wBlock in Safari by going to `Settings → Extensions` and toggling it on.
 
 2. **Import Userscripts**:
