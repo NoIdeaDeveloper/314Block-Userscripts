@@ -1,46 +1,51 @@
-Safari Userscripts - A collection of userscripts I maintain to improve the Safari borwsing experience.
+# 314Block Userscripts: Enhance Your Browsing Experience
 
--- Getting Started --
+Welcome to the 314Block Userscripts collection! These scripts were designed to improve my Safari browsing experience by redirecting and enhancing popular websites. Here's how to get started and what each script does.
 
-Install the wBlock app from the App Store and enable it in Safari → Settings → Extensions.
-Find the url to the .user.js file(s) you want and import them under the sserscripts tab in the wBlock app.
-Grant Userscripts permission to run on the relevant sites when Safari prompts you.
+## Getting Started
 
+1. **Install wBlock**:
+   - Download and install the [wBlock app](https://apps.apple.com/us/app/wblock/id1529867649) from the App Store.
+   - Enable wBlock in Safari by going to `Settings → Extensions` and toggling it on.
 
--- Scripts --
+2. **Import Userscripts**:
+   - Find the URL to the `.user.js` file(s) you want to import.
+   - Open the wBlock app, go to the `Userscripts` tab, and import the script(s).
+   - Grant Userscripts permission to run on the relevant sites when Safari prompts you.
 
-1. reddit-to-redlib.user.js — Reddit → Redlib
+## Scripts
 
-Silently redirects all Reddit pages to a Redlib instance. The full URL path and query parameters are preserved, so links to specific posts, subreddits, and search results all work correctly.
+### reddit-to-redlib.user.js
 
-Configuration: Open the script and change the destination variable to point to your preferred Redlib instance. A list of public instances is available at github.com/redlib-org/redlib-instances.
+**Description**: Redirects all Reddit pages to a Redlib instance, preserving the full URL path and query parameters.
 
-2. youtube-to-invidious.user.js — YouTube → Invidious
+**Configuration**:
+- Open the script and change the `destination` variable to point to your preferred Redlib instance.
+- A list of public instances is available at [github.com/redlib-org/redlib-instances](https://github.com/redlib-org/redlib-instances).
 
-Redirects YouTube to an Invidious instance. Handles all YouTube URL types including standard videos, short youtu.be links, search results, channel pages, and embedded players.
+### youtube-to-invidious.user.js
 
-Configuration: Open the script and change the invidious variable to your preferred instance. A list of public instances is available at docs.invidious.io/instances. You can also set videoParams and pageParams to append Invidious URL parameters (e.g. to disable comments or related videos) to every page you visit.
+**Description**: Redirects YouTube to an Invidious instance, handling all YouTube URL types.
 
-3. hackernews-dark-mode.user.js — Hacker News Enhancer
+**Configuration**:
+- Open the script and change the `invidious` variable to your preferred instance.
+- A list of public instances is available at [docs.invidious.io/instances](https://docs.invidious.io/instances).
+- You can also set `videoParams` and `pageParams` to append Invidious URL parameters (e.g., to disable comments or related videos) to every page you visit.
 
-Improves the Hacker News reading experience with a collection of visual and navigational upgrades.
+### hackernews-dark-mode.user.js
 
-- Dark mode — replaces HN's default white and orange theme with a dark Reddit-inspired colour scheme. Covers the header, story list, comment threads, input fields, and footer. All text is forced to light colours, including comments that use inline HTML colour attributes that would otherwise slip through.
-- Comment depth colours — on thread pages, each level of comment nesting is marked with a distinct coloured left border placed directly alongside the comment text, making it easy to track conversation structure at a glance. The colours cycle through red → teal → amber → green → purple → blue → coral.
-- Collapsible comment box — the reply textarea below the post title starts compact at 4 rows. Clicking into it smoothly expands it to 8 rows with an orange focus ring. If you click away without typing anything, it collapses back down automatically.
-- Comment sort bar — a row of sort buttons appears above the comment list on thread pages, allowing comments to be reordered without a page reload. Four sort modes are available:
-  
-    Best — HN's original order (default)
-    New — most recently posted root comments first, using each comment's exact timestamp
-    Top — most-replied comments first, as a proxy for popularity (HN does not expose upvote counts)
-    Controversial — highest replies-per-hour ratio first, surfacing comments that generated rapid back-and-forth discussion
-  
-- Next-parent button — a floating circular arrow button (↓) fixed to the bottom-right corner of thread pages. Clicking it skips past all child replies and jumps directly to the next top-level comment. The button stays in sync with whichever sort order is currently active.
+**Description**: Enhances the Hacker News reading experience with visual and navigational upgrades.
 
+**Features**:
+- **Dark mode**: Replaces HN's default theme with a dark, Reddit-inspired color scheme.
+- **Comment depth colors**: Distinct colored borders for each level of comment nesting.
+- **Collapsible comment box**: Expands and collapses smoothly based on user interaction.
+- **Comment sort bar**: Allows reordering comments without reloading the page.
+- **Next-parent button**: Skips past child replies to the next top-level comment.
 
-Notes:
+**Notes**:
+- All scripts use `@run-at document-start` to minimize the flash of the original page before redirecting.
+- Redirect scripts use `window.location.replace()` to avoid adding redirected pages to your browser history.
+- These scripts only run on the domains specified in their `@match` headers and do not collect or transmit any data.
 
-All three scripts use @run-at document-start so they fire as early as possible, minimising any flash of the original page before redirecting.
-The redirect scripts use window.location.replace() rather than window.location.href, which means redirected pages do not appear in your browser history — pressing Back will take you to the page before the Reddit or YouTube link, not back to the redirect.
-
-**These scripts only run on the domains specified in their @match headers and do not collect or transmit any data.**
+Happy browsing! 🚀
