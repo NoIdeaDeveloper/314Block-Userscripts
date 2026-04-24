@@ -1,14 +1,12 @@
 // =============================================================================
 // YouTube to Invidious Redirector
 // =============================================================================
-// Redirects YouTube to a private Invidious instance, preserving video IDs,
-// search queries, shorts, playlists, and channel pages. Replaces embedded
-// YouTube videos with a privacy-friendly overlay linking to Invidious instead.
+// Redirects YouTube to a configured Invidious instance, preserving the video
+// ID, timestamps, search queries, and playlists. Strips tracking parameters.
+// Replaces YouTube embeds in iframes with a privacy-friendly overlay.
 //
-// VERSION: 2.0
-// AUTHOR:  You
+// VERSION: 2.1
 // LICENSE: MIT
-// REPO:    https://github.com/yourusername/yourrepo
 // =============================================================================
 //
 // =============================================================================
@@ -29,11 +27,12 @@
 //               so it will be saved as "user-youtube-to-invidious"
 //
 // STEP 4: Scroll up to the "Custom filters" text box on the same page
-//         and add the following three lines exactly as shown:
+//         and add the following lines exactly as shown:
 //
+//            www.youtube.com##+js(user-youtube-to-invidious.js)
 //            youtube.com##+js(user-youtube-to-invidious.js)
 //            youtu.be##+js(user-youtube-to-invidious.js)
-//            youtube-nocookie.com##+js(user-youtube-to-invidious.js)
+//            www.youtube-nocookie.com##+js(user-youtube-to-invidious.js)
 //
 //         Then click "Save changes"
 //
@@ -68,35 +67,45 @@
 // -----------------------------------------------------------------------------
 //
 // =============================================================================
+// CHANGING YOUR INVIDIOUS INSTANCE
+// =============================================================================
+//
+// The script is pre-configured with "https://inv.nadeko.net" as the default
+// Invidious instance. If this instance is slow or unavailable, you can switch
+// to any other public instance:
+//
+//   1. Visit https://api.invidious.io to find a list of active instances
+//   2. Copy the URL of your preferred instance
+//   3. Replace the value of the "invidious" variable near the top of the script
+//   4. Re-save the script in Brave or Tampermonkey
+//
+// =============================================================================
 // CONFIGURATION
 // =============================================================================
 //
-// Before installing, you may want to customise the following values inside
-// the script below:
+//   invidious    — The Invidious instance all redirects will point to.
+//                  Must begin with https://
 //
-//   invidious    — The Invidious instance to redirect to.
-//                  Default: "https://inv.nadeko.net"
-//                  Find alternative instances at: https://api.invidious.io
+//   videoParams  — Query parameters appended to video watch URLs.
+//                  Customise to control Invidious player behaviour.
+//                  See your instance's settings page for available options.
 //
-//   videoParams  — Parameters appended to video watch URLs.
-//                  Default: "&related_videos=false&comments=false"
-//                  Set to "" to disable.
-//
-//   pageParams   — Parameters appended to all other Invidious page URLs.
-//                  Default: "?related_videos=false&comments=false"
-//                  Set to "" to disable.
+//   pageParams   — Same as videoParams but for non-video pages
+//                  (channels, homepage, search results, etc.)
 //
 // =============================================================================
 
 // ==UserScript==
 // @name         YouTube to Invidious Redirector
 // @namespace    http://tampermonkey.net/
-// @version      2.0
-// @description  Redirects YouTube to a private Invidious instance, preserving
-//               video IDs, search queries, shorts, playlists, and channel pages.
-//               Replaces embedded YouTube videos with a privacy overlay.
+// @version      2.1
+// @description  Redirects YouTube to a configured Invidious instance,
+//               preserving video IDs, timestamps, search queries, and
+//               playlists. Strips tracking parameters. Replaces embeds
+//               with a privacy-friendly overlay.
 // @author       You
-// @match        *://*.youtube.com/*
+// @match        *://www.youtube.com/*
+// @match        *://youtube.com/*
 // @match        *://youtu.be/*
 // @match        *://www.youtube-nocookie.com/*
 // @run-at       document-start
@@ -107,16 +116,24 @@
     'use strict';
 
     // --- CONFIGURATION ---
-    // Replace this with your preferred Invidious instance
+
+    // Your preferred Invidious instance.
     // Find available instances at: https://api.invidious.io
     var invidious = "https://inv.nadeko.net";
 
     // --- OPTIONAL: URL PARAMETERS ---
-    // Appended to video URLs to customise your Invidious experience
-    // "&" prefix is used because video URLs already have a "?" (e.g. /watch?v=...)
+    // Appended to video URLs to customise your Invidious experience.
+    // "&" prefix: used for video URLs that already have a "?" (e.g. /watch?v=...)
+    // "?" prefix: used for pages that don't already have a query string
     var videoParams = "&related_videos=false&comments=false";
-    // "?" prefix is used for pages that don't already have a query string
     var pageParams = "?related_videos=false&comments=false";
+
+    // --- GUARD: Enforce HTTPS on the configured Invidious instance ---
+    // If the instance URL were accidentally set to http://, this corrects it.
+    // Ensures browsing is always sent over an encrypted connection.
+    if (invidious.indexOf("https://") !== 0) {
+        invidious = invidious.replace(/^http:\/\//i, "https://");
+    }
 
     // --- GUARD: Don't redirect if we're already on the Invidious instance ---
     // Prevents redirect loops if the scriptlet ever runs on the Invidious page itself
@@ -126,12 +143,22 @@
 
     // --- GUARD: Don't redirect if we're inside an iframe ---
     // Instead of doing nothing, we replace the embed with a privacy-friendly overlay
-    // that lets the user choose to open the video on Invidious instead
+    // that lets the user choose to open the video on Invidious instead.
     if (window.self !== window.top) {
+
+        // Hide the iframe body immediately to prevent any YouTube content flashing
+        // on screen before the overlay is injected. Mirrors the approach used on
+        // the main redirect path.
+        var iframeStyle = document.createElement('style');
+        iframeStyle.textContent = 'body { display: none !important; }';
+        document.documentElement.appendChild(iframeStyle);
 
         // Wait for the body to be available before we can modify the page
         // (since we run at document-start, the body may not exist yet)
         document.addEventListener('DOMContentLoaded', function() {
+
+            // Reveal the body now that we're ready to inject our overlay
+            iframeStyle.remove();
 
             // Extract the video ID from the current embed URL
             // e.g. youtube.com/embed/ABC123 → ABC123
@@ -220,21 +247,38 @@
     var path = window.location.pathname;
     var query = window.location.search;
 
-    // Performs the redirect — using replace() so YouTube doesn't appear in browser history
+    // --- REDIRECT FUNCTION ---
+    // Performs the redirect using replace() so YouTube doesn't appear in
+    // browser history. Also registers an error handler so that if the
+    // Invidious instance is unreachable, the user sees a clear message
+    // rather than a silent browser error page.
     function redirect(newURL) {
+        // Listen for a page error after navigation — if Invidious is down or
+        // unreachable, reveal a user-friendly message explaining what happened.
+        window.addEventListener('error', function() {
+            style.remove(); // Reveal the page so it isn't just blank
+            document.body.innerHTML = [
+                '<div style="font-family:sans-serif;text-align:center;padding:3rem;color:#333;">',
+                '  <div style="font-size:2.5rem;margin-bottom:1rem;">⚠️</div>',
+                '  <h2 style="margin:0 0 0.5rem;">Invidious instance unreachable</h2>',
+                '  <p style="color:#666;margin:0 0 1.5rem;">',
+                '    <strong>' + new URL(newURL).hostname + '</strong> could not be reached.',
+                '  </p>',
+                '  <a href="' + newURL + '" style="color:#336699;">Try opening it directly</a>',
+                '  &nbsp;·&nbsp;',
+                '  <a href="https://api.invidious.io" target="_blank" rel="noopener noreferrer" style="color:#336699;">',
+                '    Find another instance',
+                '  </a>',
+                '</div>'
+            ].join('');
+        }, { once: true }); // Bind once — we only need to catch the first error
+
         window.location.replace(newURL);
     }
 
-    // Checks if a URL already contains our custom parameters
-    // Prevents infinite redirect loops when we're already on an Invidious page
-    function alreadyHasParams(url, params) {
-        // Strip the leading "&" or "?" before checking
-        return url.includes(params.substring(1));
-    }
-
     // --- TRACKING PARAMETER STRIPPER ---
-    // Removes YouTube/Google analytics parameters from the query string
-    // These are meaningless on Invidious and just add noise to the URL
+    // Removes YouTube/Google analytics parameters from the query string.
+    // These are meaningless on Invidious and just add noise to the URL.
     function stripTrackingParams(queryString) {
         if (!queryString) return '';
 
@@ -259,10 +303,14 @@
         return params.toString() ? '?' + params.toString() : '';
     }
 
-    // --- RULE 1: Standard YouTube video URLs (e.g. youtube.com/watch?v=ABC123) ---
+    // --- RULE 1: Standard YouTube video URLs (e.g. youtube.com/watch?v=ABC123&t=35) ---
     if (url.includes("youtube.com/watch") && query.includes("v=")) {
-        var videoID = new URLSearchParams(query).get("v"); // Extract just the video ID
-        redirect(invidious + "/watch?v=" + videoID + videoParams);
+        var parsedQuery = new URLSearchParams(query);
+        var videoID = parsedQuery.get("v");           // Extract the video ID
+        var timestamp = parsedQuery.get("t") || "";   // Preserve timestamp if present (e.g. &t=35)
+        redirect(invidious + "/watch?v=" + videoID
+            + (timestamp ? "&t=" + timestamp : "")
+            + videoParams);
         return;
     }
 
@@ -286,33 +334,20 @@
         return;
     }
 
-    // --- RULE 4: YouTube Shorts (e.g. youtube.com/shorts/ABC123) ---
-    // Shorts use the same player as regular videos, just with a different URL format
-    // Without this rule they would hit the catch-all and likely land on a broken page
+    // --- RULE 4: YouTube Shorts (e.g. youtube.com/shorts/ABC123?t=35) ---
+    // Shorts use the same player as regular videos, just with a different URL format.
+    // Without this rule they would hit the catch-all and likely land on a broken page.
     if (url.includes("youtube.com/shorts/")) {
         var shortsID = path.replace("/shorts/", ""); // Extract the video ID from the path
-        redirect(invidious + "/watch?v=" + shortsID + videoParams);
+        var shortsTimestamp = new URLSearchParams(query).get("t") || ""; // Preserve timestamp if present
+        redirect(invidious + "/watch?v=" + shortsID
+            + (shortsTimestamp ? "&t=" + shortsTimestamp : "")
+            + videoParams);
         return;
     }
 
-    // --- RULE 5: Standard YouTube embeds (e.g. youtube.com/embed/ABC123) ---
-    // Note: at this point we are NOT in an iframe (that was handled above)
-    // This handles the case where someone navigates directly to an embed URL
-    if (url.includes("youtube.com/embed/")) {
-        var embedID = path.replace("/embed/", ""); // Strip "/embed/" to get the video ID
-        redirect(invidious + "/embed/" + embedID);
-        return;
-    }
-
-    // --- RULE 6: YouTube nocookie embeds (e.g. youtube-nocookie.com/embed/ABC123) ---
-    if (url.includes("youtube-nocookie.com/embed/")) {
-        var noCookieID = path.replace("/embed/", "");
-        redirect(invidious + "/embed/" + noCookieID);
-        return;
-    }
-
-    // --- RULE 7: YouTube Playlist URLs (e.g. youtube.com/playlist?list=ABC123) ---
-    // Without this rule playlists would hit the catch-all and likely break on Invidious
+    // --- RULE 5: YouTube Playlist URLs (e.g. youtube.com/playlist?list=ABC123) ---
+    // Without this rule playlists would hit the catch-all and likely break on Invidious.
     // Invidious supports playlists natively at /playlist?list=
     if (url.includes("youtube.com/playlist") && query.includes("list=")) {
         var playlistID = new URLSearchParams(query).get("list"); // Extract playlist ID
@@ -320,11 +355,20 @@
         return;
     }
 
-    // --- RULE 8: All other YouTube pages (channels, homepage, etc.) ---
-    // Broadest/catch-all rule — must remain last so it doesn't swallow specific rules above
+    // --- RULE 6: All other YouTube pages (channels, homepage, etc.) ---
+    // Broadest/catch-all rule — must remain last so it doesn't swallow specific rules above.
+    // Builds the query string carefully to avoid a double "?" on pages that already
+    // have one (e.g. youtube.com/channel/ABC?sort=popular → /channel/ABC?sort=popular&...)
     if (url.includes("youtube.com")) {
-        var cleanPageQuery = stripTrackingParams(query); // Strip tracking before redirecting
-        redirect(invidious + path + cleanPageQuery + pageParams);
+        var cleanPageQuery = stripTrackingParams(query);
+
+        // If there's already a query string, append pageParams with "&" instead of "?"
+        // to avoid producing a malformed URL like "?sort=popular?related_videos=false"
+        var pageSuffix = cleanPageQuery
+            ? cleanPageQuery + pageParams.replace("?", "&")
+            : pageParams;
+
+        redirect(invidious + path + pageSuffix);
         return;
     }
 
