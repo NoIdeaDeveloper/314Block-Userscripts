@@ -5,7 +5,7 @@
 // ID, timestamps, search queries, and playlists. Strips tracking parameters.
 // Replaces YouTube embeds in iframes with a privacy-friendly overlay.
 //
-// VERSION: 2.1
+// VERSION: 2.5
 // LICENSE: MIT
 // =============================================================================
 //
@@ -33,6 +33,7 @@
 //            youtube.com##+js(user-youtube-to-invidious.js)
 //            youtu.be##+js(user-youtube-to-invidious.js)
 //            www.youtube-nocookie.com##+js(user-youtube-to-invidious.js)
+//            duckduckgo.com##+js(user-youtube-to-invidious.js)
 //
 //         Then click "Save changes"
 //
@@ -98,16 +99,18 @@
 // ==UserScript==
 // @name         YouTube to Invidious Redirector
 // @namespace    http://tampermonkey.net/
-// @version      2.1
+// @version      2.5
 // @description  Redirects YouTube to a configured Invidious instance,
 //               preserving video IDs, timestamps, search queries, and
 //               playlists. Strips tracking parameters. Replaces embeds
-//               with a privacy-friendly overlay.
+//               with a privacy-friendly overlay. Adds "Watch on Invidious"
+//               buttons to DuckDuckGo Videos tab results.
 // @author       You
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
 // @match        *://youtu.be/*
 // @match        *://www.youtube-nocookie.com/*
+// @match        *://duckduckgo.com/*
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
@@ -163,7 +166,7 @@
             // Extract the video ID from the current embed URL
             // e.g. youtube.com/embed/ABC123 → ABC123
             var embedPath = window.location.pathname;
-            var videoID = embedPath.replace("/embed/", "");
+            var embedVideoID = embedPath.replace("/embed/", "");
 
             // Also check for a start time parameter (?start=35 or ?t=35)
             // so the Invidious link can pick up at the same point in the video
@@ -171,7 +174,7 @@
             var startTime = params.get("start") || params.get("t") || null;
 
             // Build the Invidious link, appending the timestamp if one exists
-            var invidiousURL = invidious + "/watch?v=" + videoID
+            var invidiousURL = invidious + "/watch?v=" + embedVideoID
                 + (startTime ? "&t=" + startTime : "")
                 + videoParams;
 
@@ -237,40 +240,87 @@
         return;
     }
 
-    // Hide the page immediately to prevent YouTube content flashing on screen
-    var style = document.createElement('style');
-    style.textContent = 'body { display: none !important; }';
-    document.documentElement.appendChild(style);
-
-    // Grab the current URL, path, and query string for use in our redirect rules
-    var url = window.location.href;
-    var path = window.location.pathname;
-    var query = window.location.search;
+    // --- GUARD: Only run YouTube redirect logic on YouTube domains ---
+    // The script also runs on duckduckgo.com (for the Videos tab injection below).
+    // This check ensures the body-hiding style and redirect rules are never
+    // triggered on DDG, which would leave the page permanently blank.
+    var isYouTubeDomain = (
+        window.location.hostname === 'www.youtube.com' ||
+        window.location.hostname === 'youtube.com' ||
+        window.location.hostname === 'youtu.be' ||
+        window.location.hostname === 'www.youtube-nocookie.com'
+    );
 
     // --- REDIRECT FUNCTION ---
     // Performs the redirect using replace() so YouTube doesn't appear in
     // browser history. Also registers an error handler so that if the
     // Invidious instance is unreachable, the user sees a clear message
     // rather than a silent browser error page.
+    // Declared at IIFE scope (not inside the isYouTubeDomain block) to
+    // avoid function declarations inside conditional blocks, which is
+    // unreliable across JavaScript engines.
     function redirect(newURL) {
         // Listen for a page error after navigation — if Invidious is down or
         // unreachable, reveal a user-friendly message explaining what happened.
         window.addEventListener('error', function() {
             style.remove(); // Reveal the page so it isn't just blank
-            document.body.innerHTML = [
-                '<div style="font-family:sans-serif;text-align:center;padding:3rem;color:#333;">',
-                '  <div style="font-size:2.5rem;margin-bottom:1rem;">⚠️</div>',
-                '  <h2 style="margin:0 0 0.5rem;">Invidious instance unreachable</h2>',
-                '  <p style="color:#666;margin:0 0 1.5rem;">',
-                '    <strong>' + new URL(newURL).hostname + '</strong> could not be reached.',
-                '  </p>',
-                '  <a href="' + newURL + '" style="color:#336699;">Try opening it directly</a>',
-                '  &nbsp;·&nbsp;',
-                '  <a href="https://api.invidious.io" target="_blank" rel="noopener noreferrer" style="color:#336699;">',
-                '    Find another instance',
-                '  </a>',
-                '</div>'
-            ].join('');
+
+            // --- SAFE DOM CONSTRUCTION ---
+            // Build the error page by creating elements and setting their
+            // text/attributes individually, rather than injecting an HTML
+            // string via innerHTML. This eliminates any XSS risk from
+            // unexpected characters in the URL being interpreted as markup.
+
+            var parsedURL = new URL(newURL); // Already validated when redirect() was called
+
+            // Wrapper
+            var wrapper = document.createElement('div');
+            wrapper.style.cssText = 'font-family:sans-serif;text-align:center;padding:3rem;color:#333;';
+
+            // Warning icon
+            var icon = document.createElement('div');
+            icon.textContent = '⚠️';
+            icon.style.cssText = 'font-size:2.5rem;margin-bottom:1rem;';
+
+            // Heading
+            var heading = document.createElement('h2');
+            heading.textContent = 'Invidious instance unreachable';
+            heading.style.cssText = 'margin:0 0 0.5rem;';
+
+            // Paragraph with bolded hostname — set via textContent, never innerHTML
+            var para = document.createElement('p');
+            para.style.cssText = 'color:#666;margin:0 0 1.5rem;';
+            var strong = document.createElement('strong');
+            strong.textContent = parsedURL.hostname; // textContent: safe, no HTML interpretation
+            para.appendChild(strong);
+            para.appendChild(document.createTextNode(' could not be reached.'));
+
+            // "Try directly" link — href set via setAttribute, not string concatenation
+            var tryLink = document.createElement('a');
+            tryLink.setAttribute('href', newURL); // setAttribute: safe, treats value as literal
+            tryLink.textContent = 'Try opening it directly';
+            tryLink.style.cssText = 'color:#336699;';
+
+            // Separator
+            var separator = document.createTextNode('\u00a0·\u00a0'); // &nbsp;·&nbsp;
+
+            // "Find another instance" link — static URL, no user data involved
+            var findLink = document.createElement('a');
+            findLink.setAttribute('href', 'https://api.invidious.io');
+            findLink.setAttribute('target', '_blank');
+            findLink.setAttribute('rel', 'noopener noreferrer');
+            findLink.textContent = 'Find another instance';
+            findLink.style.cssText = 'color:#336699;';
+
+            // Assemble and replace the page body
+            wrapper.appendChild(icon);
+            wrapper.appendChild(heading);
+            wrapper.appendChild(para);
+            wrapper.appendChild(tryLink);
+            wrapper.appendChild(separator);
+            wrapper.appendChild(findLink);
+            document.body.innerHTML = ''; // Clear the body first
+            document.body.appendChild(wrapper);
         }, { once: true }); // Bind once — we only need to catch the first error
 
         window.location.replace(newURL);
@@ -279,6 +329,7 @@
     // --- TRACKING PARAMETER STRIPPER ---
     // Removes YouTube/Google analytics parameters from the query string.
     // These are meaningless on Invidious and just add noise to the URL.
+    // Declared at IIFE scope alongside redirect() for the same reason.
     function stripTrackingParams(queryString) {
         if (!queryString) return '';
 
@@ -302,6 +353,21 @@
         // Return the cleaned query string, or empty string if nothing remains
         return params.toString() ? '?' + params.toString() : '';
     }
+
+    // Skip all YouTube redirect logic if we're not on a YouTube domain
+    if (!isYouTubeDomain) {
+        // Jump ahead to the DDG section below
+    } else {
+
+    // Hide the page immediately to prevent YouTube content flashing on screen
+    var style = document.createElement('style');
+    style.textContent = 'body { display: none !important; }';
+    document.documentElement.appendChild(style);
+
+    // Grab the current URL, path, and query string for use in our redirect rules
+    var url = window.location.href;
+    var path = window.location.pathname;
+    var query = window.location.search;
 
     // --- RULE 1: Standard YouTube video URLs (e.g. youtube.com/watch?v=ABC123&t=35) ---
     if (url.includes("youtube.com/watch") && query.includes("v=")) {
@@ -370,6 +436,190 @@
 
         redirect(invidious + path + pageSuffix);
         return;
+    }
+
+    } // end if (isYouTubeDomain) / else block
+
+    // ==========================================================================
+    // DUCKDUCKGO VIDEOS TAB — "Watch on Invidious" Button Injection
+    // ==========================================================================
+    // When browsing the DuckDuckGo Videos tab, each result is a YouTube video
+    // card. This section injects a "Watch on Invidious" button onto every card,
+    // so you can open the video directly on your configured Invidious instance
+    // without first being routed through YouTube.
+    //
+    // HOW IT WORKS:
+    // Each video card is an <a> tag whose href points to the YouTube watch URL
+    // (e.g. https://www.youtube.com/watch?v=ABC123). The video ID is extracted
+    // directly from that href — no fragile class name targeting required.
+    // A "Watch on Invidious" button is then injected into the card's footer row.
+    //
+    // Because DDG loads video results dynamically (including when you switch to
+    // the Videos tab or scroll for more results), a MutationObserver watches for
+    // newly added cards and processes them as they appear.
+    // ==========================================================================
+
+    // Only run the DDG injection on duckduckgo.com
+    if (window.location.hostname !== 'duckduckgo.com') return;
+
+    // --- MARKER ATTRIBUTE ---
+    // Used to tag cards we've already processed, so the MutationObserver
+    // doesn't inject a duplicate button if a card is re-rendered by DDG's
+    // React frontend (which can happen on tab switches or layout updates).
+    var DDG_PROCESSED_ATTR = 'data-invidious-injected';
+
+    // --- BUILD INVIDIOUS URL FROM A YOUTUBE HREF ---
+    // Accepts a full YouTube watch URL string and returns the equivalent
+    // Invidious URL, with videoParams appended. Returns null if no video
+    // ID can be found (e.g. if the card links somewhere other than YouTube).
+    function buildInvidiousURL(youtubeHref) {
+        try {
+            var parsed = new URL(youtubeHref);
+
+            // Only handle standard YouTube watch URLs
+            if (!parsed.hostname.includes('youtube.com')) return null;
+
+            var videoId = parsed.searchParams.get('v');
+            if (!videoId) return null;
+
+            // Build the Invidious watch URL using the shared invidious + videoParams config
+            return invidious + '/watch?v=' + videoId + videoParams;
+        } catch (e) {
+            return null; // Malformed URL — skip this card
+        }
+    }
+
+    // --- INJECT BUTTON INTO A SINGLE VIDEO CARD ---
+    // Accepts the <a> card element, extracts the video ID from its href,
+    // and appends a styled "Watch on Invidious" button inside the card.
+    function injectButton(card) {
+        // Skip cards we've already processed
+        if (card.hasAttribute(DDG_PROCESSED_ATTR)) return;
+
+        // Extract the YouTube href from the card's own link
+        var cardHref = card.getAttribute('href');
+        if (!cardHref) return;
+
+        var invURL = buildInvidiousURL(cardHref);
+        if (!invURL) return; // Not a YouTube video link — skip
+
+        // Mark the card as processed before making any DOM changes,
+        // so a re-entrant MutationObserver call can't inject a duplicate
+        card.setAttribute(DDG_PROCESSED_ATTR, 'true');
+
+        // --- BUILD THE BUTTON ---
+        // Styled as a <button> rather than an <a> to avoid the redundancy
+        // of setting an href that is then immediately prevented by the click
+        // handler. Navigation is handled entirely by window.open() below.
+        var btn = document.createElement('button');
+        btn.textContent = '▶ Watch on Invidious';
+        btn.setAttribute('type', 'button'); // Prevents any accidental form submission
+
+        // Stop the click from also triggering the parent card's YouTube link
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation(); // Prevent click bubbling up to the <a> card wrapper
+            e.preventDefault();  // Belt-and-braces: suppress any default button behaviour
+            window.open(invURL, '_blank', 'noopener,noreferrer');
+        });
+
+        // --- BUTTON STYLES ---
+        // Matches DuckDuckGo's visual language:
+        //   • #de5833 — DDG's signature orange-red, used on their logo and primary actions
+        //   • Rounded pill shape — consistent with DDG's button style
+        //   • Small, compact size — fits neatly in the card footer without crowding
+        //   • Semibold weight and uppercase tracking — matches DDG's label conventions
+        btn.style.cssText = [
+            'display: inline-flex',
+            'align-items: center',
+            'gap: 6px',
+            'margin-top: 8px',
+            'padding: 5px 12px',
+            'background: #de5833',           // DDG orange-red — primary brand colour
+            'color: #ffffff',
+            'font-size: 0.72rem',
+            'font-weight: 600',
+            'letter-spacing: 0.03em',
+            'border: none',
+            'border-radius: 20px',           // Pill shape — consistent with DDG UI
+            'cursor: pointer',
+            'white-space: nowrap',
+            'font-family: inherit',          // Inherit DDG's system font stack
+            'position: relative',            // Ensures the button sits above the card link layer
+            'z-index: 10',
+            'transition: background 0.15s ease',  // Subtle hover feedback
+            'box-shadow: 0 1px 3px rgba(0,0,0,0.18)' // Gentle lift to distinguish from card bg
+        ].join('; ');
+
+        // Darken button slightly on hover for clear interactive feedback
+        btn.addEventListener('mouseenter', function() {
+            btn.style.background = '#c24a28'; // ~15% darker than #de5833
+        });
+        btn.addEventListener('mouseleave', function() {
+            btn.style.background = '#de5833'; // Restore original colour on mouse out
+        });
+
+        // Find the innermost <article> inside the card to append the button to.
+        // The article contains the card's content rows — appending here keeps
+        // the button visually inside the card without disrupting its layout.
+        var article = card.querySelector('article');
+        var target = article || card; // Fall back to the card itself if no article found
+        target.appendChild(btn);
+    }
+
+    // --- PROCESS ALL CURRENTLY VISIBLE CARDS ---
+    // Finds all video cards on the page right now and injects buttons into them.
+    // Called once on load and again whenever new cards are detected.
+    //
+    // Video cards are identified by their href pointing to youtube.com/watch —
+    // this is a structural selector that doesn't depend on DDG's class names.
+    function processAllCards() {
+        document.querySelectorAll('a[href*="youtube.com/watch"]').forEach(function(card) {
+            injectButton(card);
+        });
+    }
+
+    // --- OBSERVE FOR DYNAMICALLY LOADED CARDS ---
+    // DDG loads video results asynchronously — both on initial tab load and
+    // when scrolling for more results. The MutationObserver watches for new
+    // nodes being added to the DOM and runs processAllCards each time.
+    //
+    // A debounce flag (ddgPending) prevents the observer from calling
+    // processAllCards on every individual DOM mutation, which could be
+    // hundreds per second during a page load. Instead, it batches them:
+    // processAllCards runs once per animation frame at most.
+    var ddgPending = false;
+
+    var ddgObserver = new MutationObserver(function() {
+        // If a run is already scheduled for this frame, don't schedule another
+        if (ddgPending) return;
+        ddgPending = true;
+
+        // requestAnimationFrame defers the work until the browser is ready to
+        // paint, batching all mutations that occurred in the same frame into
+        // a single processAllCards call
+        requestAnimationFrame(function() {
+            processAllCards();
+            ddgPending = false; // Reset flag so the next batch can be scheduled
+        });
+    });
+
+    // Start observing once the DOM is available
+    // (this section runs after document-start, so we may need to wait)
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+            processAllCards();
+            ddgObserver.observe(document.documentElement, {
+                childList: true, // Fire when child nodes are added or removed
+                subtree: true    // Watch the entire document tree, not just direct children
+            });
+        });
+    } else {
+        // DOM already available — act immediately
+        processAllCards();
+        ddgObserver.observe(document.documentElement, {
+            childList: true,
+            subtree: true
+        });
     }
 
 })();
