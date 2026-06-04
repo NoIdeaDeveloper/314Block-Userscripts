@@ -166,7 +166,7 @@
             // Extract the video ID from the current embed URL
             // e.g. youtube.com/embed/ABC123 → ABC123
             var embedPath = window.location.pathname;
-            var embedVideoID = embedPath.replace("/embed/", "");
+            var embedVideoID = (embedPath.split('/embed/')[1] || '').split('/')[0];
 
             // Bail out if no video ID was found — avoids opening a broken Invidious URL
             if (!embedVideoID) {
@@ -415,7 +415,7 @@
     // Shorts use the same player as regular videos, just with a different URL format.
     // Without this rule they would hit the catch-all and likely land on a broken page.
     if (url.includes("youtube.com/shorts/")) {
-        var shortsID = path.replace("/shorts/", ""); // Extract the video ID from the path
+        var shortsID = (path.split('/shorts/')[1] || '').split('/')[0]; // Extract the video ID from the path
         var shortsTimestamp = new URLSearchParams(query).get("t") || ""; // Preserve timestamp if present
         redirect(invidious + "/watch?v=" + shortsID
             + (shortsTimestamp ? "&t=" + shortsTimestamp : "")

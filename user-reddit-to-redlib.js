@@ -8,7 +8,7 @@
 // VERSION: 5.0
 // AUTHOR:  You
 // LICENSE: MIT
-// REPO:    https://github.com/yourusername/yourrepo
+// REPO:    https://github.com/NoIdeaDeveloper/314Block-Userscripts
 // =============================================================================
 //
 // =============================================================================
@@ -205,6 +205,46 @@
     // Combine the chosen instance with Reddit's cleaned path and query string
     // e.g. reddit.com/r/cats?sort=new → redlib.nadeko.net/r/cats?sort=new
     var newURL = chosenInstance + currentPath + cleanQuery;
+
+    // Listen for navigation errors — if the chosen instance is unreachable,
+    // try another instance from the list before giving up
+    var triedInstances = [chosenInstance];
+    window.addEventListener('error', function errorHandler() {
+        // Find an instance we haven't tried yet
+        var remaining = INSTANCES.filter(function(url) {
+            return triedInstances.indexOf(url) === -1;
+        });
+
+        if (remaining.length > 0) {
+            var nextInstance = remaining[Math.floor(Math.random() * remaining.length)];
+            triedInstances.push(nextInstance);
+            var retryURL = nextInstance + currentPath + cleanQuery;
+            window.location.replace(retryURL);
+        } else {
+            // All instances exhausted — show a fallback message
+            window.removeEventListener('error', errorHandler);
+            style.remove();
+            document.body.innerHTML = '';
+            var wrapper = document.createElement('div');
+            wrapper.style.cssText = 'font-family:sans-serif;text-align:center;padding:3rem;color:#333;';
+            var heading = document.createElement('h2');
+            heading.textContent = 'All Redlib instances are unreachable';
+            heading.style.cssText = 'margin:0 0 0.5rem;';
+            var para = document.createElement('p');
+            para.style.cssText = 'color:#666;margin:0 0 1.5rem;';
+            para.textContent = 'Try again later or visit the instance list to find alternatives.';
+            var link = document.createElement('a');
+            link.setAttribute('href', 'https://github.com/redlib-org/redlib-instances');
+            link.setAttribute('target', '_blank');
+            link.setAttribute('rel', 'noopener noreferrer');
+            link.textContent = 'Browse Redlib instances';
+            link.style.cssText = 'color:#336699;';
+            wrapper.appendChild(heading);
+            wrapper.appendChild(para);
+            wrapper.appendChild(link);
+            document.body.appendChild(wrapper);
+        }
+    }, { once: true });
 
     // replace() means Reddit won't appear in the browser history
     window.location.replace(newURL);

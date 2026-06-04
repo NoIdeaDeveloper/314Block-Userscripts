@@ -64,7 +64,3 @@
     removeWithRetry();
 
 })();
-
-    // Start observing the entire document body for changes
-    observer.observe(document.body, observerConfig);
-})();

@@ -83,11 +83,6 @@
             text-decoration: underline;
         }
 
-        /* Vote arrow buttons */
-        .votearrow {
-            filter: invert(60%) !important;
-        }
-
         /* FIX 1: Force ALL text inside comment rows to be light coloured.
            HN sometimes inlines color="black" or color="#000000" directly on
            <font> tags inside comments, which overrides class-level CSS.
@@ -324,24 +319,22 @@
         // Grab all comment rows — HN gives each one the class "comtr"
         var commentRows = document.querySelectorAll('.comtr');
 
-        // We'll track the indent widths we've seen to map them to depth levels
-        var indentLevels = [];
-
+        // Collect all unique indent widths using a Set for O(1) dedup
+        var indentSet = new Set();
         commentRows.forEach(function (row) {
-            // HN uses a spacer image whose pixel width encodes the indent depth
             var indentImg = row.querySelector('td.ind img');
             var indentWidth = indentImg ? parseInt(indentImg.getAttribute('width'), 10) : 0;
+            indentSet.add(indentWidth);
+        });
 
-            // Build a sorted, deduplicated list of all known indent widths
-            if (!indentLevels.includes(indentWidth)) {
-                indentLevels.push(indentWidth);
-                indentLevels.sort(function (a, b) { return a - b; });
-            }
+        // Sort the unique widths to create a stable depth mapping
+        var indentLevels = Array.from(indentSet).sort(function (a, b) { return a - b; });
 
-            // The depth is simply the position of this width in the sorted list
+        // Assign depth to each comment row
+        commentRows.forEach(function (row) {
+            var indentImg = row.querySelector('td.ind img');
+            var indentWidth = indentImg ? parseInt(indentImg.getAttribute('width'), 10) : 0;
             var depth = indentLevels.indexOf(indentWidth);
-
-            // Store the depth on the row so our CSS colour rules can target it
             row.setAttribute('data-depth', depth);
         });
 
@@ -391,8 +384,20 @@
         var nextBtn = document.createElement('button');
         nextBtn.id = 'hn-next-parent-btn';
         nextBtn.title = 'Next top-level comment';
+        nextBtn.setAttribute('aria-label', 'Scroll to next top-level comment');
         nextBtn.textContent = '↓';
         document.body.appendChild(nextBtn);
+
+        // Keyboard shortcut: Shift+ArrowDown scrolls to next parent comment
+        document.addEventListener('keydown', function (e) {
+            if (e.shiftKey && e.key === 'ArrowDown' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                // Don't hijack keyboard when user is typing in an input
+                var tag = document.activeElement.tagName;
+                if (tag === 'TEXTAREA' || tag === 'INPUT') return;
+                e.preventDefault();
+                nextBtn.click();
+            }
+        });
 
         nextBtn.addEventListener('click', function () {
             // Add a small offset so a comment already at the top still counts as passed
