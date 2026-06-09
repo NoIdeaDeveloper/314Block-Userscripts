@@ -1,12 +1,12 @@
 // =============================================================================
 // Reddit to Redlib Redirector (Random Instance)
 // =============================================================================
-// Redirects Reddit to a randomly selected Redlib instance, preserving the URL
-// path and query string. Strips known Reddit tracking parameters from URLs
-// before redirecting.
+// Redirects Reddit to a randomly selected, reachable Redlib instance,
+// preserving the URL path and query string. Strips known Reddit tracking
+// parameters from URLs before redirecting.
 //
-// VERSION: 5.0
-// AUTHOR:  You
+// VERSION: 6.0
+// AUTHOR:  NoIdeaDeveloper
 // LICENSE: MIT
 // REPO:    https://github.com/NoIdeaDeveloper/314Block-Userscripts
 // =============================================================================
@@ -31,7 +31,10 @@
 // STEP 4: Scroll up to the "Custom filters" text box on the same page
 //         and add the following line exactly as shown:
 //
-//            www.reddit.com##+js(user-reddit-to-redlib.js)
+//            *.reddit.com##+js(user-reddit-to-redlib.js)
+//
+//         (The ".js" above is Brave's scriptlet reference syntax — it refers
+//          to the saved scriptlet name, not to any file in this repository.)
 //
 //         Then click "Save changes"
 //
@@ -69,7 +72,13 @@
 // HOW INSTANCE SELECTION WORKS
 // =============================================================================
 //
-// A random instance is picked from the hardcoded list below on every visit.
+// On every visit the instance list is shuffled into a random order, then each
+// instance is probed in turn with a lightweight connectivity check. You are
+// redirected to the FIRST instance that responds — so if your randomly chosen
+// instance happens to be down, the script automatically rolls on to the next
+// one instead of dumping you on a browser error page. If every instance is
+// unreachable, a short fallback page is shown with a link to the instance list.
+//
 // The list is sourced from the official Redlib instances JSON file at:
 //   https://raw.githubusercontent.com/redlib-org/redlib-instances/refs/heads/main/instances.json
 //
@@ -87,28 +96,32 @@
 // CONFIGURATION
 // =============================================================================
 //
-// You can customise the following values inside the script below:
+//   INSTANCES   — The hardcoded list of Redlib instances to randomly pick from.
+//                 .onion and .i2p addresses are excluded as normal browsers
+//                 cannot reach them.
 //
-//   INSTANCES  — The hardcoded list of Redlib instances to randomly pick from.
-//                .onion and .i2p addresses are excluded as normal browsers
-//                cannot reach them.
+//   FALLBACK    — Used if the INSTANCES array is somehow empty. Should be
+//                 a reliable instance you trust.
 //
-//   FALLBACK   — Used if the INSTANCES array is somehow empty. Should be
-//                a reliable instance you trust.
+//   PROBE_TIMEOUT_MS — How long to wait for an instance to respond before
+//                 treating it as unreachable and moving on to the next one.
 //
 // =============================================================================
 
 // ==UserScript==
 // @name         Reddit to Redlib Redirector (Random Instance)
-// @namespace    http://tampermonkey.net/
-// @version      5.0
-// @description  Redirects Reddit to a randomly selected Redlib instance,
-//               preserving the URL path and query string. Strips tracking
-//               parameters before redirecting.
-// @author       You
-// @match        *://www.reddit.com/*
+// @namespace    https://github.com/NoIdeaDeveloper/314Block-Userscripts
+// @version      6.0
+// @description  Redirects Reddit to a randomly selected, reachable Redlib
+//               instance, preserving the URL path and query string. Probes
+//               instances and rolls on to the next if one is down. Strips
+//               tracking parameters before redirecting.
+// @author       NoIdeaDeveloper
+// @match        *://*.reddit.com/*
 // @run-at       document-start
 // @grant        none
+// @downloadURL  https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/user-reddit-to-redlib.user.js
+// @updateURL    https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/user-reddit-to-redlib.user.js
 // ==/UserScript==
 
 (function() {
@@ -134,6 +147,9 @@
 
     // Fallback used only if INSTANCES is somehow empty
     var FALLBACK = "https://redlib.perennialte.ch";
+
+    // How long (ms) to wait for an instance to respond before moving on
+    var PROBE_TIMEOUT_MS = 2500;
 
     // --- GUARD: Don't redirect if we're already on a Redlib instance ---
     // Checks the current hostname against every instance in the list
@@ -186,44 +202,58 @@
         return params.toString() ? '?' + params.toString() : '';
     }
 
-    // --- RANDOM INSTANCE PICKER ---
-    // Selects a random instance from the INSTANCES array on every visit
-    function pickRandomInstance() {
-        // Safety check — fall back to hardcoded instance if the list is empty
-        if (!INSTANCES.length) return FALLBACK;
-
-        // Math.random() produces a different value on every call
-        var randomIndex = Math.floor(Math.random() * INSTANCES.length);
-        return INSTANCES[randomIndex];
+    // --- SHUFFLE ---
+    // Returns a randomly ordered copy of an array (Fisher–Yates). We try
+    // instances in this shuffled order so load is spread across the list
+    // while still allowing us to fall through to the next one on failure.
+    function shuffled(arr) {
+        var copy = arr.slice();
+        for (var i = copy.length - 1; i > 0; i--) {
+            var j = Math.floor(Math.random() * (i + 1));
+            var tmp = copy[i];
+            copy[i] = copy[j];
+            copy[j] = tmp;
+        }
+        return copy;
     }
 
-    // --- REDIRECT ---
-    // Strip tracking params, pick a random instance, and redirect
+    // --- BUILD A REDLIB URL ---
+    // Combines an instance origin with Reddit's cleaned path and query string,
+    // using the URL constructor for safe, well-formed output.
     var cleanQuery = stripTrackingParams(currentQuery);
-    var chosenInstance = pickRandomInstance();
+    function buildURL(instance) {
+        return new URL(currentPath + cleanQuery, instance).href;
+    }
 
-    // Combine the chosen instance with Reddit's cleaned path and query string
-    // e.g. reddit.com/r/cats?sort=new → redlib.nadeko.net/r/cats?sort=new
-    var newURL = chosenInstance + currentPath + cleanQuery;
-
-    // Listen for navigation errors — if the chosen instance is unreachable,
-    // try another instance from the list before giving up
-    var triedInstances = [chosenInstance];
-    window.addEventListener('error', function errorHandler() {
-        // Find an instance we haven't tried yet
-        var remaining = INSTANCES.filter(function(url) {
-            return triedInstances.indexOf(url) === -1;
+    // --- PROBE AN INSTANCE'S REACHABILITY ---
+    // Sends a lightweight no-cors HEAD request with a hard timeout. A no-cors
+    // request resolves for any HTTP response (we can't read the status, but we
+    // don't need to) and rejects on a genuine network failure — DNS error,
+    // connection refused, or TLS failure — which is exactly the "instance is
+    // down" case we want to detect. This replaces the previous approach of
+    // listening for a window "error" event after navigating, which never
+    // actually fired for failed top-level navigations.
+    function probe(baseUrl, timeoutMs) {
+        return new Promise(function(resolve) {
+            var settled = false;
+            function finish(ok) {
+                if (settled) return;
+                settled = true;
+                resolve(ok);
+            }
+            var timer = setTimeout(function() { finish(false); }, timeoutMs);
+            fetch(baseUrl, { method: 'HEAD', mode: 'no-cors', cache: 'no-store' })
+                .then(function() { clearTimeout(timer); finish(true); })
+                .catch(function() { clearTimeout(timer); finish(false); });
         });
+    }
 
-        if (remaining.length > 0) {
-            var nextInstance = remaining[Math.floor(Math.random() * remaining.length)];
-            triedInstances.push(nextInstance);
-            var retryURL = nextInstance + currentPath + cleanQuery;
-            window.location.replace(retryURL);
-        } else {
-            // All instances exhausted — show a fallback message
-            window.removeEventListener('error', errorHandler);
-            style.remove();
+    // --- ALL-UNREACHABLE FALLBACK PAGE ---
+    // Built with safe DOM methods (textContent / setAttribute), never innerHTML,
+    // so nothing in the URL can be interpreted as markup.
+    function showAllUnreachable() {
+        function render() {
+            style.remove(); // Reveal the page so it isn't just blank
             document.body.innerHTML = '';
             var wrapper = document.createElement('div');
             wrapper.style.cssText = 'font-family:sans-serif;text-align:center;padding:3rem;color:#333;';
@@ -244,9 +274,30 @@
             wrapper.appendChild(link);
             document.body.appendChild(wrapper);
         }
-    }, { once: true });
+        // The body may not exist yet at document-start — wait if necessary.
+        if (document.body) render();
+        else document.addEventListener('DOMContentLoaded', render);
+    }
 
-    // replace() means Reddit won't appear in the browser history
-    window.location.replace(newURL);
+    // --- REDIRECT ---
+    // Walk the shuffled instance list, probing each one, and redirect to the
+    // first that responds. If none respond, show the fallback page.
+    var candidates = shuffled(INSTANCES.length ? INSTANCES : [FALLBACK]);
+
+    (function tryNext(i) {
+        if (i >= candidates.length) {
+            showAllUnreachable();
+            return;
+        }
+        var instance = candidates[i];
+        probe(instance, PROBE_TIMEOUT_MS).then(function(reachable) {
+            if (reachable) {
+                // replace() means Reddit won't appear in the browser history
+                window.location.replace(buildURL(instance));
+            } else {
+                tryNext(i + 1);
+            }
+        });
+    })(0);
 
 })();

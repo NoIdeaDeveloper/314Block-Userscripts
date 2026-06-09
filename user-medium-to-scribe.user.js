@@ -3,7 +3,7 @@
 // =============================================================================
 // Redirects Medium articles to Scribe (scribe.rip), preserving the URL path.
 //
-// VERSION: 1.4
+// VERSION: 1.5
 // LICENSE: MIT
 //
 // =============================================================================
@@ -28,6 +28,10 @@
 //
 //            www.medium.com##+js(user-medium-to-scribe.js)
 //            medium.com##+js(user-medium-to-scribe.js)
+//            *.medium.com##+js(user-medium-to-scribe.js)
+//
+//         (The ".js" above is Brave's scriptlet reference syntax — it refers
+//          to the saved scriptlet name, not to any file in this repository.)
 //
 //         Then click "Save changes"
 //
@@ -72,15 +76,18 @@
 
 // ==UserScript==
 // @name         Medium to Scribe Redirector
-// @namespace    http://tampermonkey.net/
-// @version      1.4
+// @namespace    https://github.com/NoIdeaDeveloper/314Block-Userscripts
+// @version      1.5
 // @description  Redirects Medium articles to Scribe (scribe.rip), preserving
 //               the URL path. Strips tracking parameters before redirecting.
-// @author       You
+// @author       NoIdeaDeveloper
 // @match        *://medium.com/*
 // @match        *://www.medium.com/*
+// @match        *://*.medium.com/*
 // @run-at       document-start
 // @grant        none
+// @downloadURL  https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/user-medium-to-scribe.user.js
+// @updateURL    https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/user-medium-to-scribe.user.js
 // ==/UserScript==
 
 (function() {
@@ -89,19 +96,30 @@
     // --- CONFIGURATION ---
 
     // The Scribe instance all redirects will point to.
-    // Must use https:// — enforced below before any redirect fires.
+    // Must use https:// — enforced and validated below before any redirect fires.
     var SCRIBE_BASE = "https://scribe.rip";
 
-    // --- GUARD: Enforce HTTPS on the configured Scribe instance ---
-    // If SCRIBE_BASE were accidentally changed to http://, this corrects it.
-    // Ensures your browsing is always sent over an encrypted connection.
-    if (SCRIBE_BASE.indexOf("https://") !== 0) {
-        SCRIBE_BASE = SCRIBE_BASE.replace(/^http:\/\//i, "https://");
+    // --- GUARD: Validate and normalise the configured Scribe instance ---
+    // Parses the configured value with the URL constructor and forces it to a
+    // bare https origin. Anything that isn't a valid http(s) URL falls back to
+    // the known-good default, so a typo can never send you to a junk or
+    // non-https destination (e.g. "javascript:" or a malformed string).
+    try {
+        var parsedBase = new URL(SCRIBE_BASE);
+        if (parsedBase.protocol !== 'https:' && parsedBase.protocol !== 'http:') {
+            throw new Error('unsupported protocol');
+        }
+        SCRIBE_BASE = 'https://' + parsedBase.host; // force https, drop any path/query
+    } catch (e) {
+        SCRIBE_BASE = 'https://scribe.rip';
     }
+
+    // Hostname of the Scribe instance, used for the loop-prevention guard below.
+    var SCRIBE_HOST = new URL(SCRIBE_BASE).hostname;
 
     // --- GUARD: Don't redirect if we're already on Scribe ---
     // Prevents an infinite redirect loop if scribe.rip is somehow matched
-    if (window.location.hostname === "scribe.rip") return;
+    if (window.location.hostname === SCRIBE_HOST) return;
 
     // --- GUARD: Don't redirect if we're inside an iframe ---
     // Prevents the script from breaking Medium embeds on third-party websites
@@ -138,16 +156,18 @@
     // Non-article pages (tags, profiles, homepages) don't match this pattern,
     // so we use it to decide whether a redirect to Scribe makes sense.
     function isArticleUrl(path) {
+        // Ignore any trailing slashes so "/@user/my-article-09a6af907a2/" still
+        // matches the same way "/@user/my-article-09a6af907a2" does.
+        var trimmed = path.replace(/\/+$/, '');
         // Regex: hyphen, then 8–14 lowercase hex characters, at end of path
-        return /-[a-f0-9]{8,14}$/i.test(path);
+        return /-[a-f0-9]{8,14}$/i.test(trimmed);
     }
 
     // --- REDIRECT CHECK ---
     // Runs on every navigation (both hard loads and client-side URL changes).
     // If the current URL looks like an article, redirects to Scribe.
     // Otherwise does nothing, allowing the page to load normally on Medium.
-    // Accepts the observer so it can be disconnected cleanly before redirecting.
-    function maybeRedirect(observer) {
+    function maybeRedirect() {
         var currentPath = window.location.pathname;   // e.g. "/@user/my-article-09a6af907a2"
         var currentQuery = window.location.search;    // e.g. "?source=rss"
 
@@ -158,10 +178,6 @@
         // This correctly handles any unusual characters in the path or query string.
         var cleanQuery = stripTrackingParams(currentQuery);
         var newURL = new URL(currentPath + cleanQuery, SCRIBE_BASE).href;
-
-        // Stop observing DOM changes before navigating away — tidies up and
-        // prevents any theoretical double-fire during the redirect transition.
-        if (observer) observer.disconnect();
 
         // replace() is used so the Medium page doesn't appear in browser history,
         // meaning the back button won't loop the user back through Medium
@@ -178,8 +194,7 @@
 
     if (isArticleUrl(window.location.pathname)) {
         // It's an article — redirect immediately, keeping the body hidden.
-        // No observer exists yet at this point, so we pass null.
-        maybeRedirect(null);
+        maybeRedirect();
     } else {
         // Not an article — reveal the page and let Medium load normally
         style.remove();
@@ -187,27 +202,38 @@
 
     // --- CLIENT-SIDE NAVIGATION: watch for URL changes within Medium ---
     // Medium is a single-page app. When you click a link inside Medium, the
-    // browser doesn't reload the page — it just updates the URL and swaps
-    // the content via JavaScript. This means document-start only fires once,
-    // on the initial load. To catch these internal navigations, we use a
-    // MutationObserver to watch for DOM changes and check the URL each time.
-    var lastPath = window.location.pathname; // Track the last seen path to avoid double-firing
+    // browser doesn't reload the page — it just updates the URL via the History
+    // API and swaps the content via JavaScript. document-start only fires once,
+    // on the initial load, so we need to catch these internal navigations too.
+    //
+    // The browser fires "popstate" for back/forward navigation, but NOT for
+    // pushState/replaceState (which is what Medium uses for in-app navigation).
+    // We patch both so they emit a custom event, then listen for everything.
+    // This is far cheaper than the previous whole-document MutationObserver,
+    // which re-checked the URL on every single DOM mutation Medium produced.
+    var lastPath = window.location.pathname; // Avoid reacting to no-op URL updates
 
-    var observer = new MutationObserver(function() {
-        var newPath = window.location.pathname;
+    function onLocationChange() {
+        if (window.location.pathname === lastPath) return;
+        lastPath = window.location.pathname;
+        maybeRedirect();
+    }
 
-        // Only act if the URL path has actually changed since we last checked
-        if (newPath === lastPath) return;
-        lastPath = newPath; // Update our record of the current path
-
-        // Run the same redirect check as on a hard load, passing the observer
-        // so it can be disconnected cleanly if a redirect is triggered
-        maybeRedirect(observer);
+    ['pushState', 'replaceState'].forEach(function(method) {
+        try {
+            var original = history[method].bind(history);
+            history[method] = function() {
+                var result = original.apply(history, arguments);
+                window.dispatchEvent(new Event('medium-locationchange'));
+                return result;
+            };
+        } catch (e) {
+            // Patching failed — leave the original History method intact.
+            // Back/forward navigation is still covered by the popstate listener.
+        }
     });
 
-    // Observe the entire document for any DOM changes.
-    // subtree: true catches changes anywhere in the page, not just direct children.
-    // childList: true fires when elements are added or removed (covers page transitions).
-    observer.observe(document.documentElement, { subtree: true, childList: true });
+    window.addEventListener('popstate', onLocationChange);
+    window.addEventListener('medium-locationchange', onLocationChange);
 
 })();

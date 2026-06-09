@@ -45,13 +45,23 @@
     }
 
     // Watch for future DOM changes (e.g. after navigation or lazy loading)
-    // and remove matching elements as soon as they appear
+    // and remove matching elements as soon as they appear.
+    //
+    // A debounce flag batches rapid mutations into a single removeElements call
+    // per animation frame, rather than running the (relatively expensive)
+    // querySelectorAll on every individual mutation — a busy page can otherwise
+    // emit hundreds of mutations per second.
+    let pending = false;
     const observer = new MutationObserver(function(mutations) {
         // Only act if something was actually added to the DOM
         const hasAddedNodes = mutations.some(m => m.addedNodes.length > 0);
-        if (hasAddedNodes) {
+        if (!hasAddedNodes || pending) return;
+
+        pending = true;
+        requestAnimationFrame(function() {
             removeElements();
-        }
+            pending = false;
+        });
     });
 
     // Start observing the whole document for added elements

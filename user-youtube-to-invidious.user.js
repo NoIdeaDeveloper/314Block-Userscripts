@@ -5,7 +5,7 @@
 // ID, timestamps, search queries, and playlists. Strips tracking parameters.
 // Replaces YouTube embeds in iframes with a privacy-friendly overlay.
 //
-// VERSION: 2.8
+// VERSION: 2.9
 // LICENSE: MIT
 // =============================================================================
 //
@@ -34,6 +34,9 @@
 //            youtu.be##+js(user-youtube-to-invidious.js)
 //            www.youtube-nocookie.com##+js(user-youtube-to-invidious.js)
 //            duckduckgo.com##+js(user-youtube-to-invidious.js)
+//
+//         (The ".js" above is Brave's scriptlet reference syntax — it refers
+//          to the saved scriptlet name, not to any file in this repository.)
 //
 //         Then click "Save changes"
 //
@@ -98,14 +101,14 @@
 
 // ==UserScript==
 // @name         YouTube to Invidious Redirector
-// @namespace    http://tampermonkey.net/
-// @version      2.8
+// @namespace    https://github.com/NoIdeaDeveloper/314Block-Userscripts
+// @version      2.9
 // @description  Redirects YouTube to a configured Invidious instance,
 //               preserving video IDs, timestamps, search queries, and
 //               playlists. Strips tracking parameters. Replaces embeds
 //               with a privacy-friendly overlay. Adds "Watch on Invidious"
 //               buttons to DuckDuckGo Videos tab results.
-// @author       You
+// @author       NoIdeaDeveloper
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
 // @match        *://youtu.be/*
@@ -113,6 +116,8 @@
 // @match        *://duckduckgo.com/*
 // @run-at       document-start
 // @grant        none
+// @downloadURL  https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/user-youtube-to-invidious.user.js
+// @updateURL    https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/user-youtube-to-invidious.user.js
 // ==/UserScript==
 
 (function() {
@@ -131,16 +136,31 @@
     var videoParams = "&related_videos=false&comments=false";
     var pageParams = "?related_videos=false&comments=false";
 
-    // --- GUARD: Enforce HTTPS on the configured Invidious instance ---
-    // If the instance URL were accidentally set to http://, this corrects it.
-    // Ensures browsing is always sent over an encrypted connection.
-    if (invidious.indexOf("https://") !== 0) {
-        invidious = invidious.replace(/^http:\/\//i, "https://");
+    // How long (ms) to wait for the Invidious instance to respond before
+    // showing the "unreachable" fallback page instead of redirecting.
+    var PROBE_TIMEOUT_MS = 2500;
+
+    // --- GUARD: Validate and normalise the configured Invidious instance ---
+    // Parse the configured value and force it to a bare https origin. Anything
+    // that isn't a valid http(s) URL (a typo, "javascript:", a malformed string)
+    // falls back to the known-good default, so a misconfiguration can never send
+    // you to a junk or non-https destination.
+    try {
+        var parsedInstance = new URL(invidious);
+        if (parsedInstance.protocol !== 'https:' && parsedInstance.protocol !== 'http:') {
+            throw new Error('unsupported protocol');
+        }
+        invidious = 'https://' + parsedInstance.host; // force https, drop any path/query
+    } catch (e) {
+        invidious = 'https://inv.nadeko.net';
     }
 
+    // Hostname of the validated instance, used for the loop-prevention guard.
+    var invidiousHost = new URL(invidious).hostname;
+
     // --- GUARD: Don't redirect if we're already on the Invidious instance ---
-    // Prevents redirect loops if the scriptlet ever runs on the Invidious page itself
-    if (window.location.hostname === new URL(invidious).hostname) {
+    // Prevents redirect loops if the script ever runs on the Invidious page itself
+    if (window.location.hostname === invidiousHost) {
         return;
     }
 
@@ -170,7 +190,6 @@
 
             // Bail out if no video ID was found — avoids opening a broken Invidious URL
             if (!embedVideoID) {
-                iframeStyle.remove();
                 return;
             }
 
@@ -260,29 +279,41 @@
         window.location.hostname === 'www.youtube-nocookie.com'
     );
 
-    // --- REDIRECT FUNCTION ---
-    // Performs the redirect using replace() so YouTube doesn't appear in
-    // browser history. Also registers an error handler so that if the
-    // Invidious instance is unreachable, the user sees a clear message
-    // rather than a silent browser error page.
-    //
-    // Accepts the body-hiding <style> element as a parameter rather than
-    // closing over it as a free variable. This keeps the function self-contained
-    // and avoids a potential ReferenceError if it were ever called before
-    // the style element is assigned (which would happen on non-YouTube domains).
-    function redirect(newURL, styleEl) {
-        // Listen for a page error after navigation — if Invidious is down or
-        // unreachable, reveal a user-friendly message explaining what happened.
-        window.addEventListener('error', function() {
+    // --- PROBE AN INSTANCE'S REACHABILITY ---
+    // Sends a lightweight no-cors HEAD request with a hard timeout. A no-cors
+    // request resolves for any HTTP response and rejects on a genuine network
+    // failure (DNS error, connection refused, TLS failure) — exactly the
+    // "instance is down" case. This replaces the previous approach of listening
+    // for a window "error" event after navigating, which never actually fired
+    // for failed top-level navigations.
+    function probe(baseUrl, timeoutMs) {
+        return new Promise(function(resolve) {
+            var settled = false;
+            function finish(ok) {
+                if (settled) return;
+                settled = true;
+                resolve(ok);
+            }
+            var timer = setTimeout(function() { finish(false); }, timeoutMs);
+            fetch(baseUrl, { method: 'HEAD', mode: 'no-cors', cache: 'no-store' })
+                .then(function() { clearTimeout(timer); finish(true); })
+                .catch(function() { clearTimeout(timer); finish(false); });
+        });
+    }
+
+    // --- "INSTANCE UNREACHABLE" FALLBACK PAGE ---
+    // Built with safe DOM methods (textContent / setAttribute), never innerHTML,
+    // so nothing in the URL can be interpreted as markup.
+    function showUnreachable(newURL, styleEl) {
+        function render() {
             if (styleEl) styleEl.remove(); // Reveal the page so it isn't just blank
 
-            // --- SAFE DOM CONSTRUCTION ---
-            // Build the error page by creating elements and setting their
-            // text/attributes individually, rather than injecting an HTML
-            // string via innerHTML. This eliminates any XSS risk from
-            // unexpected characters in the URL being interpreted as markup.
-
-            var parsedURL = new URL(newURL); // Already validated when redirect() was called
+            var parsedURL;
+            try {
+                parsedURL = new URL(newURL);
+            } catch (e) {
+                parsedURL = { hostname: invidiousHost };
+            }
 
             // Wrapper
             var wrapper = document.createElement('div');
@@ -313,7 +344,7 @@
             tryLink.style.cssText = 'color:#336699;';
 
             // Separator
-            var separator = document.createTextNode('\u00a0·\u00a0'); // &nbsp;·&nbsp;
+            var separator = document.createTextNode(' · '); // &nbsp;·&nbsp;
 
             // "Find another instance" link — static URL, no user data involved
             var findLink = document.createElement('a');
@@ -332,15 +363,34 @@
             wrapper.appendChild(findLink);
             document.body.innerHTML = ''; // Clear the body first
             document.body.appendChild(wrapper);
-        }, { once: true }); // Bind once — we only need to catch the first error
+        }
 
-        window.location.replace(newURL);
+        // The body may not exist yet at document-start — wait if necessary.
+        if (document.body) render();
+        else document.addEventListener('DOMContentLoaded', render);
+    }
+
+    // --- REDIRECT FUNCTION ---
+    // Probes the Invidious instance first. If it responds, navigate with
+    // replace() so YouTube doesn't appear in browser history. If it's
+    // unreachable, show a clear message instead of dumping the user on a
+    // silent browser error page.
+    //
+    // Accepts the body-hiding <style> element as a parameter so it can be
+    // revealed if we end up showing the fallback page.
+    function redirect(newURL, styleEl) {
+        probe(invidious, PROBE_TIMEOUT_MS).then(function(reachable) {
+            if (reachable) {
+                window.location.replace(newURL);
+            } else {
+                showUnreachable(newURL, styleEl);
+            }
+        });
     }
 
     // --- TRACKING PARAMETER STRIPPER ---
     // Removes YouTube/Google analytics parameters from the query string.
     // These are meaningless on Invidious and just add noise to the URL.
-    // Declared at IIFE scope alongside redirect() for the same reason.
     function stripTrackingParams(queryString) {
         if (!queryString) return '';
 
@@ -381,34 +431,41 @@
     var query = window.location.search;
 
     // --- RULE 1: Standard YouTube video URLs (e.g. youtube.com/watch?v=ABC123&t=35) ---
-    if (url.includes("youtube.com/watch") && query.includes("v=")) {
+    // Check the parsed "v" value directly rather than a loose query.includes("v=")
+    // test, which would also fire for unrelated params like "?srv=1".
+    if (url.includes("youtube.com/watch")) {
         var parsedQuery = new URLSearchParams(query);
         var videoID = parsedQuery.get("v");           // Extract the video ID
-        var timestamp = parsedQuery.get("t") || "";   // Preserve timestamp if present (e.g. &t=35)
-        redirect(invidious + "/watch?v=" + videoID
-            + (timestamp ? "&t=" + timestamp : "")
-            + videoParams, style);
-        return;
+        if (videoID) {
+            var timestamp = parsedQuery.get("t") || "";   // Preserve timestamp if present (e.g. &t=35)
+            redirect(invidious + "/watch?v=" + videoID
+                + (timestamp ? "&t=" + timestamp : "")
+                + videoParams, style);
+            return;
+        }
     }
 
     // --- RULE 2: youtu.be short URLs (e.g. youtu.be/ABC123?t=35) ---
     if (window.location.hostname === "youtu.be") {
         var shortID = path.substring(1); // Remove the leading "/" to get just the video ID
+        if (shortID) {
+            // Strip tracking params but preserve legitimate ones like timestamps (?t=35)
+            var cleanQuery = stripTrackingParams(query);
 
-        // Strip tracking params but preserve legitimate ones like timestamps (?t=35)
-        var cleanQuery = stripTrackingParams(query);
-
-        // Convert any remaining "?" to "&" since we're appending to an existing query string
-        var queryPart = cleanQuery ? cleanQuery.replace("?", "&") : "";
-        redirect(invidious + "/watch?v=" + shortID + queryPart + videoParams, style);
-        return;
+            // Convert any remaining "?" to "&" since we're appending to an existing query string
+            var queryPart = cleanQuery ? cleanQuery.replace("?", "&") : "";
+            redirect(invidious + "/watch?v=" + shortID + queryPart + videoParams, style);
+            return;
+        }
     }
 
     // --- RULE 3: YouTube search results (e.g. youtube.com/results?search_query=cats) ---
-    if (url.includes("youtube.com/results") && query.includes("search_query=")) {
+    if (url.includes("youtube.com/results")) {
         var searchQuery = new URLSearchParams(query).get("search_query"); // Extract search term
-        redirect(invidious + "/search?q=" + encodeURIComponent(searchQuery), style);
-        return;
+        if (searchQuery) {
+            redirect(invidious + "/search?q=" + encodeURIComponent(searchQuery), style);
+            return;
+        }
     }
 
     // --- RULE 4: YouTube Shorts (e.g. youtube.com/shorts/ABC123?t=35) ---
@@ -416,20 +473,24 @@
     // Without this rule they would hit the catch-all and likely land on a broken page.
     if (url.includes("youtube.com/shorts/")) {
         var shortsID = (path.split('/shorts/')[1] || '').split('/')[0]; // Extract the video ID from the path
-        var shortsTimestamp = new URLSearchParams(query).get("t") || ""; // Preserve timestamp if present
-        redirect(invidious + "/watch?v=" + shortsID
-            + (shortsTimestamp ? "&t=" + shortsTimestamp : "")
-            + videoParams, style);
-        return;
+        if (shortsID) {
+            var shortsTimestamp = new URLSearchParams(query).get("t") || ""; // Preserve timestamp if present
+            redirect(invidious + "/watch?v=" + shortsID
+                + (shortsTimestamp ? "&t=" + shortsTimestamp : "")
+                + videoParams, style);
+            return;
+        }
     }
 
     // --- RULE 5: YouTube Playlist URLs (e.g. youtube.com/playlist?list=ABC123) ---
     // Without this rule playlists would hit the catch-all and likely break on Invidious.
     // Invidious supports playlists natively at /playlist?list=
-    if (url.includes("youtube.com/playlist") && query.includes("list=")) {
+    if (url.includes("youtube.com/playlist")) {
         var playlistID = new URLSearchParams(query).get("list"); // Extract playlist ID
-        redirect(invidious + "/playlist?list=" + playlistID, style);
-        return;
+        if (playlistID) {
+            redirect(invidious + "/playlist?list=" + playlistID, style);
+            return;
+        }
     }
 
     // --- RULE 6: All other YouTube pages (channels, homepage, etc.) ---
@@ -448,6 +509,14 @@
         redirect(invidious + path + pageSuffix, style);
         return;
     }
+
+    // --- SAFETY NET: no rule matched ---
+    // This happens on YouTube-ish domains that none of the rules above handle —
+    // e.g. a top-level youtube-nocookie.com page (whose host does NOT contain
+    // "youtube.com", so the catch-all skips it), or a youtu.be page with an empty
+    // path. Reveal the page so the user isn't left staring at a permanently blank
+    // (display:none) screen.
+    style.remove();
 
     } // end if (isYouTubeDomain) / else block
 
@@ -591,6 +660,11 @@
         // We intercept the click rather than changing href directly, to avoid
         // DDG's React router potentially overwriting the attribute on re-render.
         card.addEventListener('click', function(e) {
+            // Respect modified clicks (open-in-new-tab/window, middle click) —
+            // let the browser handle those natively rather than hijacking them.
+            if (e.button === 1 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) {
+                return;
+            }
             e.preventDefault();  // Stop DDG from following the YouTube href
             e.stopPropagation(); // Prevent React from handling this click
             window.open(invURL, '_blank', 'noopener,noreferrer');
