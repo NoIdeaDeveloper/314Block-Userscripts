@@ -76,7 +76,7 @@ tab results.
 - 6 URL pattern rules (watch, youtu.be, search, Shorts, playlists, catch-all)
 - Tracking parameter stripping (UTM, si, pp, feature, ab_channel)
 - YouTube embed iframe replacement with a privacy overlay
-- DuckDuckGo Videos tab integration
+- DuckDuckGo Videos tab integration (on `duckduckgo.com` and `noai.duckduckgo.com`)
 - SPA navigation detection
 - Reachability probing — if the instance is down you get a clear message with a
   link to find another, instead of a silent browser error page

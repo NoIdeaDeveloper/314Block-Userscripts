@@ -34,6 +34,7 @@
 //            youtu.be##+js(user-youtube-to-invidious.js)
 //            www.youtube-nocookie.com##+js(user-youtube-to-invidious.js)
 //            duckduckgo.com##+js(user-youtube-to-invidious.js)
+//            noai.duckduckgo.com##+js(user-youtube-to-invidious.js)
 //
 //         (The ".js" above is Brave's scriptlet reference syntax — it refers
 //          to the saved scriptlet name, not to any file in this repository.)
@@ -114,6 +115,7 @@
 // @match        *://youtu.be/*
 // @match        *://www.youtube-nocookie.com/*
 // @match        *://duckduckgo.com/*
+// @match        *://noai.duckduckgo.com/*
 // @run-at       document-start
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/user-youtube-to-invidious.user.js
@@ -548,8 +550,10 @@
     // entered or left — so there is zero overhead on all other DDG tabs.
     // ==========================================================================
 
-    // Only run the DDG injection on duckduckgo.com
-    if (window.location.hostname !== 'duckduckgo.com') return;
+    // Only run the DDG injection on DuckDuckGo. This covers both the main site
+    // and the AI-free "noai." subdomain, which serves the same Videos tab markup.
+    var ddgHost = window.location.hostname;
+    if (ddgHost !== 'duckduckgo.com' && ddgHost !== 'noai.duckduckgo.com') return;
 
     // --- MARKER ATTRIBUTE ---
     // Used to tag cards we've already processed, so the MutationObserver
