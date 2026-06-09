@@ -1,12 +1,15 @@
 // ==UserScript==
 // @name         Reddit to Redlib Redirector
-// @namespace    http://tampermonkey.net/
-// @version      3.1
+// @namespace    https://github.com/NoIdeaDeveloper/314Block-Userscripts
+// @version      3.2
 // @description  Redirects Reddit to a private Redlib instance, preserving the URL path
-// @author       You
+// @author       NoIdeaDeveloper
+// @license      MIT
 // @match        *://*.reddit.com/*
 // @run-at       document-start
 // @grant        none
+// @downloadURL  https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/reddit-to-redlib.user.js
+// @updateURL    https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/reddit-to-redlib.user.js
 // ==/UserScript==
 
 // NOTE: This is the simpler, single-instance version of the Reddit redirector.

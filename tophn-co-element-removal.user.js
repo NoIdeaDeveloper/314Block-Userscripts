@@ -1,11 +1,14 @@
 // ==UserScript==
 // @name         TopHN Element Remover
-// @namespace    http://tampermonkey.net/
-// @version      1.2
+// @namespace    https://github.com/NoIdeaDeveloper/314Block-Userscripts
+// @version      1.3
 // @description  Remove specific div elements from TopHN
-// @author       You
+// @author       NoIdeaDeveloper
+// @license      MIT
 // @match        https://www.tophn.co/*
 // @grant        none
+// @downloadURL  https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/tophn-co-element-removal.user.js
+// @updateURL    https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/tophn-co-element-removal.user.js
 // ==/UserScript==
 
 (function() {

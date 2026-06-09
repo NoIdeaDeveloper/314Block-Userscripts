@@ -5,7 +5,7 @@
 // ID, timestamps, search queries, and playlists. Strips tracking parameters.
 // Replaces YouTube embeds in iframes with a privacy-friendly overlay.
 //
-// VERSION: 2.9
+// VERSION: 3.0
 // LICENSE: MIT
 // =============================================================================
 //
@@ -103,13 +103,14 @@
 // ==UserScript==
 // @name         YouTube to Invidious Redirector
 // @namespace    https://github.com/NoIdeaDeveloper/314Block-Userscripts
-// @version      2.9
+// @version      3.0
 // @description  Redirects YouTube to a configured Invidious instance,
 //               preserving video IDs, timestamps, search queries, and
 //               playlists. Strips tracking parameters. Replaces embeds
 //               with a privacy-friendly overlay. Adds "Watch on Invidious"
 //               buttons to DuckDuckGo Videos tab results.
 // @author       NoIdeaDeveloper
+// @license      MIT
 // @match        *://www.youtube.com/*
 // @match        *://youtube.com/*
 // @match        *://youtu.be/*
@@ -427,28 +428,37 @@
     style.textContent = 'body { display: none !important; }';
     document.documentElement.appendChild(style);
 
-    // Grab the current URL, path, and query string for use in our redirect rules
-    var url = window.location.href;
+    // Grab the current host, path, and query string for use in our redirect rules.
+    // We match on hostname + pathname rather than substring-testing the whole URL
+    // string, so a value like "?q=youtube.com/watch" in the query can never be
+    // mistaken for an actual YouTube path.
+    var host = window.location.hostname;
     var path = window.location.pathname;
     var query = window.location.search;
+
+    // True for youtube.com and any of its subdomains (www, m, music, …).
+    // youtu.be is handled separately by RULE 2.
+    var isYouTubeCom = (host === 'youtube.com' || host.endsWith('.youtube.com'));
 
     // --- RULE 1: Standard YouTube video URLs (e.g. youtube.com/watch?v=ABC123&t=35) ---
     // Check the parsed "v" value directly rather than a loose query.includes("v=")
     // test, which would also fire for unrelated params like "?srv=1".
-    if (url.includes("youtube.com/watch")) {
+    // Video IDs are encoded so any unexpected characters can't break out of the
+    // query string (real IDs are [A-Za-z0-9_-], but a crafted link could differ).
+    if (isYouTubeCom && path === '/watch') {
         var parsedQuery = new URLSearchParams(query);
         var videoID = parsedQuery.get("v");           // Extract the video ID
         if (videoID) {
             var timestamp = parsedQuery.get("t") || "";   // Preserve timestamp if present (e.g. &t=35)
-            redirect(invidious + "/watch?v=" + videoID
-                + (timestamp ? "&t=" + timestamp : "")
+            redirect(invidious + "/watch?v=" + encodeURIComponent(videoID)
+                + (timestamp ? "&t=" + encodeURIComponent(timestamp) : "")
                 + videoParams, style);
             return;
         }
     }
 
     // --- RULE 2: youtu.be short URLs (e.g. youtu.be/ABC123?t=35) ---
-    if (window.location.hostname === "youtu.be") {
+    if (host === "youtu.be") {
         var shortID = path.substring(1); // Remove the leading "/" to get just the video ID
         if (shortID) {
             // Strip tracking params but preserve legitimate ones like timestamps (?t=35)
@@ -456,13 +466,13 @@
 
             // Convert any remaining "?" to "&" since we're appending to an existing query string
             var queryPart = cleanQuery ? cleanQuery.replace("?", "&") : "";
-            redirect(invidious + "/watch?v=" + shortID + queryPart + videoParams, style);
+            redirect(invidious + "/watch?v=" + encodeURIComponent(shortID) + queryPart + videoParams, style);
             return;
         }
     }
 
     // --- RULE 3: YouTube search results (e.g. youtube.com/results?search_query=cats) ---
-    if (url.includes("youtube.com/results")) {
+    if (isYouTubeCom && path === '/results') {
         var searchQuery = new URLSearchParams(query).get("search_query"); // Extract search term
         if (searchQuery) {
             redirect(invidious + "/search?q=" + encodeURIComponent(searchQuery), style);
@@ -473,12 +483,12 @@
     // --- RULE 4: YouTube Shorts (e.g. youtube.com/shorts/ABC123?t=35) ---
     // Shorts use the same player as regular videos, just with a different URL format.
     // Without this rule they would hit the catch-all and likely land on a broken page.
-    if (url.includes("youtube.com/shorts/")) {
+    if (isYouTubeCom && path.indexOf('/shorts/') === 0) {
         var shortsID = (path.split('/shorts/')[1] || '').split('/')[0]; // Extract the video ID from the path
         if (shortsID) {
             var shortsTimestamp = new URLSearchParams(query).get("t") || ""; // Preserve timestamp if present
-            redirect(invidious + "/watch?v=" + shortsID
-                + (shortsTimestamp ? "&t=" + shortsTimestamp : "")
+            redirect(invidious + "/watch?v=" + encodeURIComponent(shortsID)
+                + (shortsTimestamp ? "&t=" + encodeURIComponent(shortsTimestamp) : "")
                 + videoParams, style);
             return;
         }
@@ -487,10 +497,10 @@
     // --- RULE 5: YouTube Playlist URLs (e.g. youtube.com/playlist?list=ABC123) ---
     // Without this rule playlists would hit the catch-all and likely break on Invidious.
     // Invidious supports playlists natively at /playlist?list=
-    if (url.includes("youtube.com/playlist")) {
+    if (isYouTubeCom && path === '/playlist') {
         var playlistID = new URLSearchParams(query).get("list"); // Extract playlist ID
         if (playlistID) {
-            redirect(invidious + "/playlist?list=" + playlistID, style);
+            redirect(invidious + "/playlist?list=" + encodeURIComponent(playlistID), style);
             return;
         }
     }
@@ -499,7 +509,7 @@
     // Broadest/catch-all rule — must remain last so it doesn't swallow specific rules above.
     // Builds the query string carefully to avoid a double "?" on pages that already
     // have one (e.g. youtube.com/channel/ABC?sort=popular → /channel/ABC?sort=popular&...)
-    if (url.includes("youtube.com")) {
+    if (isYouTubeCom) {
         var cleanPageQuery = stripTrackingParams(query);
 
         // If there's already a query string, append pageParams with "&" instead of "?"

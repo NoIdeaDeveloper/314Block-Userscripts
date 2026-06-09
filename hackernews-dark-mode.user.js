@@ -1,12 +1,15 @@
 // ==UserScript==
 // @name         Hacker News — Dark Mode & Reddit-Style Comments
-// @namespace    http://tampermonkey.net/
-// @version      1.9
+// @namespace    https://github.com/NoIdeaDeveloper/314Block-Userscripts
+// @version      2.0
 // @description  Adds dark mode, Reddit-style colour-coded comment threads, and a next-parent navigation button
-// @author       You
+// @author       NoIdeaDeveloper
+// @license      MIT
 // @match        *://news.ycombinator.com/*
 // @run-at       document-start
 // @grant        none
+// @downloadURL  https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/hackernews-dark-mode.user.js
+// @updateURL    https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/hackernews-dark-mode.user.js
 // ==/UserScript==
 
 (function () {
@@ -327,14 +330,20 @@
             indentSet.add(indentWidth);
         });
 
-        // Sort the unique widths to create a stable depth mapping
+        // Sort the unique widths to create a stable depth mapping, then build a
+        // width → depth lookup map. Using the map gives O(1) lookups per comment
+        // below, instead of an O(n) indexOf scan for every single row.
         var indentLevels = Array.from(indentSet).sort(function (a, b) { return a - b; });
+        var depthByWidth = new Map();
+        indentLevels.forEach(function (width, depth) {
+            depthByWidth.set(width, depth);
+        });
 
         // Assign depth to each comment row
         commentRows.forEach(function (row) {
             var indentImg = row.querySelector('td.ind img');
             var indentWidth = indentImg ? parseInt(indentImg.getAttribute('width'), 10) : 0;
-            var depth = indentLevels.indexOf(indentWidth);
+            var depth = depthByWidth.get(indentWidth);
             row.setAttribute('data-depth', depth);
         });
 

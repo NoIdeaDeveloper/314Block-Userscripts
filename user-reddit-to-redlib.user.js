@@ -5,7 +5,7 @@
 // preserving the URL path and query string. Strips known Reddit tracking
 // parameters from URLs before redirecting.
 //
-// VERSION: 6.0
+// VERSION: 6.1
 // AUTHOR:  NoIdeaDeveloper
 // LICENSE: MIT
 // REPO:    https://github.com/NoIdeaDeveloper/314Block-Userscripts
@@ -111,12 +111,13 @@
 // ==UserScript==
 // @name         Reddit to Redlib Redirector (Random Instance)
 // @namespace    https://github.com/NoIdeaDeveloper/314Block-Userscripts
-// @version      6.0
+// @version      6.1
 // @description  Redirects Reddit to a randomly selected, reachable Redlib
 //               instance, preserving the URL path and query string. Probes
 //               instances and rolls on to the next if one is down. Strips
 //               tracking parameters before redirecting.
 // @author       NoIdeaDeveloper
+// @license      MIT
 // @match        *://*.reddit.com/*
 // @run-at       document-start
 // @grant        none

@@ -1,19 +1,22 @@
 // ==UserScript==
 // @name         YouTube to Invidious Redirector
-// @namespace    http://tampermonkey.net/
-// @version      1.1
+// @namespace    https://github.com/NoIdeaDeveloper/314Block-Userscripts
+// @version      1.3
 // @description  Redirects YouTube to an Invidious instance, preserving video IDs, search queries, and channel pages
-// @author       You
+// @author       NoIdeaDeveloper
+// @license      MIT
 // @match        *://*.youtube.com/*
 // @match        *://youtu.be/*
 // @match        *://www.youtube-nocookie.com/*
 // @run-at       document-start
 // @grant        none
+// @downloadURL  https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/youtube-to-invidious.user.js
+// @updateURL    https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/youtube-to-invidious.user.js
 // ==/UserScript==
 
 // NOTE: This is the simpler, older version of the YouTube redirector.
 // For a full-featured version with embed replacement, DuckDuckGo integration,
-// tracking parameter stripping, and error handling, use user-youtube-to-invidious.js instead.
+// tracking parameter stripping, and error handling, use user-youtube-to-invidious.user.js instead.
 
 (function() {
     'use strict';
@@ -60,10 +63,18 @@
     style.textContent = 'body { display: none !important; }';
     document.documentElement.appendChild(style);
 
-    // Grab the full current URL for matching against our rules
-    var url = window.location.href;
+    // Grab the current host, path, and query for matching against our rules.
+    // We match on hostname + pathname rather than substring-testing the whole
+    // URL string, so a value like "?q=youtube.com/watch" in the query can never
+    // be mistaken for an actual YouTube path.
+    var host = window.location.hostname;
     var path = window.location.pathname;
     var query = window.location.search;
+
+    // True for youtube.com and any of its subdomains (www, m, music, …)
+    var isYouTube = (host === 'youtube.com' || host.endsWith('.youtube.com'));
+    // True for the privacy-enhanced youtube-nocookie.com embed domain
+    var isNoCookie = host.endsWith('youtube-nocookie.com');
 
     // Helper function that performs the redirect.
     // Using replace() means the YouTube page won't appear in your browser history.
@@ -92,30 +103,32 @@
     // --- RULE 1: YouTube video URLs (e.g. youtube.com/watch?v=ABC123) ---
     // Check the parsed "v" value directly rather than a loose query.includes("v=")
     // test, which would also fire for unrelated params like "?srv=1".
-    if (url.includes("youtube.com/watch")) {
+    // Video IDs are encoded so any unexpected characters can't break out of the
+    // query string (real IDs are [A-Za-z0-9_-], but a crafted link could differ).
+    if (isYouTube && path === '/watch') {
         var videoID = new URLSearchParams(query).get("v");
         if (videoID) {
             var timestamp = new URLSearchParams(query).get("t") || "";
-            redirect(invidious + "/watch?v=" + videoID
-                + (timestamp ? "&t=" + timestamp : "")
+            redirect(invidious + "/watch?v=" + encodeURIComponent(videoID)
+                + (timestamp ? "&t=" + encodeURIComponent(timestamp) : "")
                 + videoParams);
             return;
         }
     }
 
     // --- RULE 2: youtu.be short URLs (e.g. youtu.be/ABC123?t=35) ---
-    if (window.location.hostname === "youtu.be") {
+    if (host === "youtu.be") {
         var shortID = path.substring(1);
         if (shortID) {
             var cleanQuery = stripTrackingParams(query);
             var queryPart = cleanQuery ? cleanQuery.replace("?", "&") : "";
-            redirect(invidious + "/watch?v=" + shortID + queryPart + videoParams);
+            redirect(invidious + "/watch?v=" + encodeURIComponent(shortID) + queryPart + videoParams);
             return;
         }
     }
 
     // --- RULE 3: YouTube search results (e.g. youtube.com/results?search_query=cats) ---
-    if (url.includes("youtube.com/results")) {
+    if (isYouTube && path === '/results') {
         var searchQuery = new URLSearchParams(query).get("search_query");
         if (searchQuery) {
             redirect(invidious + "/search?q=" + encodeURIComponent(searchQuery));
@@ -124,21 +137,25 @@
     }
 
     // --- RULE 4: Standard YouTube embeds (e.g. youtube.com/embed/ABC123) ---
-    if (url.includes("youtube.com/embed/")) {
+    if (isYouTube && path.indexOf('/embed/') === 0) {
         var embedID = (path.split('/embed/')[1] || '').split('/')[0];
-        redirect(invidious + "/embed/" + embedID);
-        return;
+        if (embedID) {
+            redirect(invidious + "/embed/" + encodeURIComponent(embedID));
+            return;
+        }
     }
 
     // --- RULE 5: YouTube nocookie embeds (e.g. youtube-nocookie.com/embed/ABC123) ---
-    if (url.includes("youtube-nocookie.com/embed/")) {
+    if (isNoCookie && path.indexOf('/embed/') === 0) {
         var noCookieID = (path.split('/embed/')[1] || '').split('/')[0];
-        redirect(invidious + "/embed/" + noCookieID);
-        return;
+        if (noCookieID) {
+            redirect(invidious + "/embed/" + encodeURIComponent(noCookieID));
+            return;
+        }
     }
 
     // --- RULE 6: All other YouTube pages (e.g. channel pages, homepage) ---
-    if (url.includes("youtube.com")) {
+    if (isYouTube) {
         var cleanPageQuery = stripTrackingParams(query);
         var pageSuffix = cleanPageQuery
             ? cleanPageQuery + pageParams.replace("?", "&")

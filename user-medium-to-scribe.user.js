@@ -3,7 +3,7 @@
 // =============================================================================
 // Redirects Medium articles to Scribe (scribe.rip), preserving the URL path.
 //
-// VERSION: 1.5
+// VERSION: 1.6
 // LICENSE: MIT
 //
 // =============================================================================
@@ -77,10 +77,11 @@
 // ==UserScript==
 // @name         Medium to Scribe Redirector
 // @namespace    https://github.com/NoIdeaDeveloper/314Block-Userscripts
-// @version      1.5
+// @version      1.6
 // @description  Redirects Medium articles to Scribe (scribe.rip), preserving
 //               the URL path. Strips tracking parameters before redirecting.
 // @author       NoIdeaDeveloper
+// @license      MIT
 // @match        *://medium.com/*
 // @match        *://www.medium.com/*
 // @match        *://*.medium.com/*
