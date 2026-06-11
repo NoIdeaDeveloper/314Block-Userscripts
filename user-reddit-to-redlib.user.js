@@ -5,7 +5,7 @@
 // preserving the URL path and query string. Strips known Reddit tracking
 // parameters from URLs before redirecting.
 //
-// VERSION: 6.1
+// VERSION: 6.2
 // AUTHOR:  NoIdeaDeveloper
 // LICENSE: MIT
 // REPO:    https://github.com/NoIdeaDeveloper/314Block-Userscripts
@@ -79,6 +79,18 @@
 // one instead of dumping you on a browser error page. If every instance is
 // unreachable, a short fallback page is shown with a link to the instance list.
 //
+// IMPORTANT — about probing and Reddit's Content-Security-Policy:
+//   Reddit serves a strict CSP ("default-src 'none'" with no connect-src), which
+//   blocks ordinary fetch/XHR from inside the page to ANY other origin. That
+//   means the connectivity probe can only work via GM_xmlhttpRequest, which runs
+//   outside the page and bypasses its CSP. So:
+//     • Tampermonkey (Option B): full probing + automatic failover (uses
+//       GM_xmlhttpRequest — note the @grant and @connect lines in the header).
+//     • Brave scriptlets (Option A): GM_xmlhttpRequest isn't available, so the
+//       script skips probing and redirects straight to a randomly chosen
+//       instance. (An earlier version tried a page-context fetch here, which
+//       Reddit's CSP silently blocked — making EVERY instance look unreachable.)
+//
 // The list is sourced from the official Redlib instances JSON file at:
 //   https://raw.githubusercontent.com/redlib-org/redlib-instances/refs/heads/main/instances.json
 //
@@ -111,7 +123,7 @@
 // ==UserScript==
 // @name         Reddit to Redlib Redirector (Random Instance)
 // @namespace    https://github.com/NoIdeaDeveloper/314Block-Userscripts
-// @version      6.1
+// @version      6.2
 // @description  Redirects Reddit to a randomly selected, reachable Redlib
 //               instance, preserving the URL path and query string. Probes
 //               instances and rolls on to the next if one is down. Strips
@@ -120,7 +132,8 @@
 // @license      MIT
 // @match        *://*.reddit.com/*
 // @run-at       document-start
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @connect      *
 // @downloadURL  https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/user-reddit-to-redlib.user.js
 // @updateURL    https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/user-reddit-to-redlib.user.js
 // ==/UserScript==
@@ -221,25 +234,38 @@
     }
 
     // --- PROBE AN INSTANCE'S REACHABILITY ---
-    // Sends a lightweight no-cors HEAD request with a hard timeout. A no-cors
-    // request resolves for any HTTP response (we can't read the status, but we
-    // don't need to) and rejects on a genuine network failure — DNS error,
-    // connection refused, or TLS failure — which is exactly the "instance is
-    // down" case we want to detect. This replaces the previous approach of
-    // listening for a window "error" event after navigating, which never
-    // actually fired for failed top-level navigations.
+    // Sends a lightweight HEAD request with a hard timeout. It resolves true for
+    // any HTTP response (we can't always read the status, but we don't need to)
+    // and false on a genuine network failure — DNS error, connection refused, or
+    // TLS failure — which is exactly the "instance is down" case we want.
+    //
+    // The request MUST go through GM_xmlhttpRequest, not the page's fetch/XHR.
+    // Reddit's CSP is "default-src 'none'" with no connect-src, so any in-page
+    // request to another origin is blocked before it leaves the browser — which
+    // made the previous fetch-based probe report EVERY instance as unreachable.
+    // GM_xmlhttpRequest runs outside the page and is not subject to that CSP.
+    //
+    // When GM_xmlhttpRequest is unavailable (Brave scriptlets, or @grant none)
+    // there is no CSP-bypassing request we can make, so we optimistically treat
+    // the instance as reachable and redirect to it directly (no failover).
+    var gmxhr = (typeof GM_xmlhttpRequest !== 'undefined') ? GM_xmlhttpRequest : null;
     function probe(baseUrl, timeoutMs) {
         return new Promise(function(resolve) {
+            if (!gmxhr) { resolve(true); return; }
             var settled = false;
             function finish(ok) {
                 if (settled) return;
                 settled = true;
                 resolve(ok);
             }
-            var timer = setTimeout(function() { finish(false); }, timeoutMs);
-            fetch(baseUrl, { method: 'HEAD', mode: 'no-cors', cache: 'no-store' })
-                .then(function() { clearTimeout(timer); finish(true); })
-                .catch(function() { clearTimeout(timer); finish(false); });
+            gmxhr({
+                method: 'HEAD',
+                url: baseUrl,
+                timeout: timeoutMs,
+                onload: function() { finish(true); },
+                onerror: function() { finish(false); },
+                ontimeout: function() { finish(false); }
+            });
         });
     }
 
