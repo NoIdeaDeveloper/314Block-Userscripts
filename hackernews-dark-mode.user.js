@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Hacker News — Dark Mode & Reddit-Style Comments
 // @namespace    https://github.com/NoIdeaDeveloper/314Block-Userscripts
-// @version      2.0
+// @version      2.1
 // @description  Dark mode, colour-coded comment threads, new-comment highlighting, OP/reply highlighting, keyboard navigation, collapsible threads, a sticky header, visited-story dimming, and a settings panel for Hacker News
 // @author       NoIdeaDeveloper
 // @license      MIT
