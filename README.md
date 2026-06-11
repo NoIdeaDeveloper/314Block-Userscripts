@@ -107,15 +107,34 @@ URL path. Strips tracking parameters and handles SPA navigation.
 
 ### hackernews-dark-mode.user.js
 
-**Description**: Enhances the Hacker News reading experience with visual and
-navigational upgrades.
+**Description**: Enhances the Hacker News reading experience with visual,
+navigational, and reading-state upgrades. Every feature can be toggled live from
+an in-page settings panel (the ⚙ button, bottom-right).
 
 **Features**:
-- **Dark mode**: a dark, Reddit-inspired colour scheme.
+- **Dark mode**: a dark, Reddit-inspired colour scheme. Choose On, Off, or Auto
+  (follow your OS `prefers-color-scheme`).
 - **Comment depth colors**: distinct colored borders per nesting level.
-- **Collapsible comment box**: expands/collapses based on focus.
-- **Comment sort bar**: reorder comments without reloading.
-- **Next-parent button**: skip to the next top-level comment (also `Shift+ArrowDown`).
+- **New-comment highlighting**: comments posted since your last visit to a thread
+  are tinted and badged (with a count shown in the sticky header).
+- **OP & reply highlighting**: the story submitter is badged "OP" throughout the
+  thread, and direct replies to your own comments are badged too.
+- **Keyboard navigation**: `j`/`k` to move between comments (or stories on list
+  pages), `p` to jump to the parent comment, `c` to collapse/expand, `o`/`Enter`
+  to open links, and `Shift+ArrowDown` to skip to the next top-level comment.
+- **Collapsible comment box**: the reply textarea expands/collapses on focus.
+- **Comment sort bar**: reorder comments (Best/New/Top/Controversial) without
+  reloading. *(Top/Controversial use reply-count proxies — HN exposes no
+  per-comment scores, in its HTML or its APIs.)*
+- **Sticky story header**: keeps the title (and a "top" jump) in view while you
+  read deep threads.
+- **Visited-story dimming**: stories you've already opened are dimmed on the
+  front page and other listings, persisted across sessions.
+- **Reading controls**: adjustable font size, line height, and content width.
+- **Next-parent button**: a floating button to skip to the next top-level comment.
+
+All state (settings, visited stories, per-thread last-visit timestamps) is stored
+locally in your browser via `localStorage`; nothing is sent anywhere.
 
 ### tophn-co-element-removal.user.js
 

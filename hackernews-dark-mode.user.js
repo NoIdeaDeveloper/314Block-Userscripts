@@ -2,7 +2,7 @@
 // @name         Hacker News — Dark Mode & Reddit-Style Comments
 // @namespace    https://github.com/NoIdeaDeveloper/314Block-Userscripts
 // @version      2.0
-// @description  Adds dark mode, Reddit-style colour-coded comment threads, and a next-parent navigation button
+// @description  Dark mode, colour-coded comment threads, new-comment highlighting, OP/reply highlighting, keyboard navigation, collapsible threads, a sticky header, visited-story dimming, and a settings panel for Hacker News
 // @author       NoIdeaDeveloper
 // @license      MIT
 // @match        *://news.ycombinator.com/*
@@ -16,159 +16,162 @@
     'use strict';
 
     // =========================================================================
+    // SECTION 0: SETTINGS
+    // Settings are read synchronously at document-start (localStorage is
+    // available before the DOM exists), so the chosen theme is applied with no
+    // flash of the original page. Every feature is gated by a class toggled on
+    // <html>, which means the in-page settings panel can switch features on and
+    // off live without a reload.
+    // =========================================================================
+
+    var SETTINGS_KEY = 'hn-enhancer-settings';
+
+    var DEFAULTS = {
+        darkMode:     'on',   // 'on' | 'off' | 'auto' (auto = follow OS preference)
+        depthColors:  true,   // colour-coded left borders per nesting depth
+        newComments:  true,   // highlight comments posted since your last visit
+        opHighlight:  true,   // badge the submitter (OP) and replies to you
+        keyboardNav:  true,   // j/k/p/c/o keyboard navigation
+        sortBar:      true,   // comment sort bar
+        navButton:    true,   // floating next-parent button
+        stickyHeader: true,   // sticky story title while scrolling comments
+        visitedDim:   true,   // dim stories you've already visited
+        fontSize:     14,     // base font size (px) for titles and comment text
+        lineHeight:   1.4,    // comment text line height
+        width:        0       // content max-width (px); 0 = native HN width
+    };
+
+    function loadSettings() {
+        try {
+            return Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}'));
+        } catch (e) {
+            return Object.assign({}, DEFAULTS);
+        }
+    }
+
+    function saveSettings(s) {
+        try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch (e) { /* private mode / quota */ }
+    }
+
+    var settings = loadSettings();
+
+    // Resolve whether dark mode should currently be active, honouring 'auto'.
+    function darkActive(s) {
+        if (s.darkMode === 'off') return false;
+        if (s.darkMode === 'on') return true;
+        return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    }
+
+    // Toggle a feature class on <html>. All themed CSS is scoped under these
+    // classes, so adding/removing one enables/disables the feature instantly.
+    function setClass(name, on) {
+        document.documentElement.classList.toggle(name, !!on);
+    }
+
+    // Build the CSS for the user's font-size / line-height / width preferences.
+    function prefsCSS(s) {
+        var css = '';
+        css += '.commtext { font-size:' + s.fontSize + 'px !important; line-height:' + s.lineHeight + ' !important; }';
+        css += '.titleline > a { font-size:' + s.fontSize + 'px !important; }';
+        if (s.width > 0) {
+            css += '#hnmain { width:100% !important; max-width:' + s.width + 'px !important; }';
+        }
+        return css;
+    }
+
+    // Apply every setting: toggle the feature classes and refresh the prefs CSS.
+    var prefStyle = null;
+    function applySettings(s) {
+        setClass('hn-dark',         darkActive(s));
+        setClass('hn-depthcolors',  s.depthColors);
+        setClass('hn-newcomments',  s.newComments);
+        setClass('hn-ophighlight',  s.opHighlight);
+        setClass('hn-keyboardnav',  s.keyboardNav);
+        setClass('hn-sortbar',      s.sortBar);
+        setClass('hn-navbutton',    s.navButton);
+        setClass('hn-stickyheader', s.stickyHeader);
+        setClass('hn-visiteddim',   s.visitedDim);
+        if (prefStyle) prefStyle.textContent = prefsCSS(s);
+    }
+
+    // =========================================================================
     // SECTION 1: INJECT CSS
-    // All visual styling is handled here — dark mode colours, comment indent
-    // colour coding, and the floating navigation button.
+    // All visual styling lives here. Every rule is scoped under an html.hn-*
+    // class so it only takes effect when that feature is enabled.
     // =========================================================================
     var style = document.createElement('style');
     style.textContent = `
 
-        /* --- DARK MODE BASE --- */
-        /* Override HN's default white/orange with a dark background palette */
-        html, body {
+        /* === DARK MODE (scoped under html.hn-dark) ============================ */
+
+        html.hn-dark, html.hn-dark body {
             background-color: #1a1a1b !important;
             color: #d7dadc !important;
         }
 
-        /* The main page table that wraps everything */
-        body > center > table,
-        body > center > table td {
+        html.hn-dark body > center > table,
+        html.hn-dark body > center > table td {
             background-color: #1a1a1b !important;
         }
 
         /* The orange header bar — darken it to a deep charcoal */
-        #hnmain > tbody > tr:first-child td,
-        .pagetop,
-        .pagetop a,
-        td[bgcolor="#ff6600"] {
+        html.hn-dark #hnmain > tbody > tr:first-child td,
+        html.hn-dark .pagetop,
+        html.hn-dark .pagetop a,
+        html.hn-dark td[bgcolor="#ff6600"] {
             background-color: #272729 !important;
             color: #d7dadc !important;
         }
 
-        /* Nav links in the header */
-        .pagetop a {
-            color: #818384 !important;
-        }
-        .pagetop a:hover {
-            color: #d7dadc !important;
-        }
+        html.hn-dark .pagetop a { color: #818384 !important; }
+        html.hn-dark .pagetop a:hover { color: #d7dadc !important; }
 
         /* The thin spacer line between header and content */
-        .pagetop + tr td {
-            background-color: #343536 !important;
-        }
+        html.hn-dark .pagetop + tr td { background-color: #343536 !important; }
 
-        /* Story list rows */
-        .athing {
-            background-color: #1a1a1b !important;
-        }
+        html.hn-dark .athing { background-color: #1a1a1b !important; }
 
-        /* Story titles */
-        .titleline > a,
-        .titleline > a:visited {
-            color: #d7dadc !important;
-            font-size: 14px !important;
-        }
+        html.hn-dark .titleline > a,
+        html.hn-dark .titleline > a:visited { color: #d7dadc !important; }
 
-        /* Site domain label next to story title e.g. (github.com) */
-        .sitebit a, .sitestr {
-            color: #818384 !important;
-        }
+        html.hn-dark .sitebit a, html.hn-dark .sitestr { color: #818384 !important; }
 
-        /* Story metadata row — points, author, age, comments link */
-        .subtext, .subtext a {
-            color: #818384 !important;
-        }
+        html.hn-dark .subtext, html.hn-dark .subtext a { color: #818384 !important; }
+        html.hn-dark .subtext a:hover { color: #d7dadc !important; text-decoration: underline; }
 
-        /* Hover colour for metadata links */
-        .subtext a:hover {
-            color: #d7dadc !important;
-            text-decoration: underline;
-        }
+        /* Force ALL text inside comment rows light — HN sometimes inlines
+           color="black" on <font> tags, which would otherwise win. */
+        html.hn-dark .comtr * { color: #d7dadc !important; }
 
-        /* FIX 1: Force ALL text inside comment rows to be light coloured.
-           HN sometimes inlines color="black" or color="#000000" directly on
-           <font> tags inside comments, which overrides class-level CSS.
-           Targeting every element inside .comtr ensures nothing slips through. */
-        .comtr * {
-            color: #d7dadc !important;
-        }
+        /* Re-apply specific accent colours the wildcard above would flatten */
+        html.hn-dark .hnuser, html.hn-dark a.hnuser { color: #ff6314 !important; font-weight: 600; }
+        html.hn-dark .age a, html.hn-dark .reply a { color: #818384 !important; }
+        html.hn-dark .reply a:hover, html.hn-dark .age a:hover { color: #d7dadc !important; }
+        html.hn-dark .comment a { color: #4fbdff !important; }
+        html.hn-dark .votearrow { filter: invert(60%) !important; }
 
-        /* Re-apply specific colour overrides that the wildcard above would flatten */
+        html.hn-dark #hnmain > tbody > tr:last-child td { background-color: #272729 !important; }
 
-        /* Commenter username — orange accent */
-        .hnuser, a.hnuser {
-            color: #ff6314 !important;
-            font-weight: 600;
-        }
+        html.hn-dark #hnmain > tbody > tr:last-child td,
+        html.hn-dark #hnmain > tbody > tr:last-child td *,
+        html.hn-dark .yclinks,
+        html.hn-dark .yclinks * { color: #d7dadc !important; }
+        html.hn-dark .yclinks a:hover { color: #ffffff !important; text-decoration: underline; }
 
-        /* Comment age / timestamp and reply link — muted grey */
-        .age a, .reply a {
-            color: #818384 !important;
-        }
-        .reply a:hover, .age a:hover {
-            color: #d7dadc !important;
-        }
-
-        /* Links inside comment bodies — blue accent */
-        .comment a {
-            color: #4fbdff !important;
-        }
-
-        /* Vote arrow buttons — keep them visible on dark background */
-        .votearrow {
-            filter: invert(60%) !important;
-        }
-
-        /* The footer bar background */
-        #hnmain > tbody > tr:last-child td {
-            background-color: #272729 !important;
-        }
-
-        /* FOOTER FIX: HN's footer contains a <span class="yclinks"> with plain <a> tags
-           and also bare text nodes. The wildcard selector ensures every element inside
-           the footer row is forced to white, overriding any inherited grey. */
-        #hnmain > tbody > tr:last-child td,
-        #hnmain > tbody > tr:last-child td *,
-        .yclinks,
-        .yclinks * {
-            color: #d7dadc !important;
-        }
-        .yclinks a:hover {
-            color: #ffffff !important;
-            text-decoration: underline;
-        }
-
-        /* Text input fields (e.g. search, submit) */
-        input, textarea {
+        html.hn-dark input, html.hn-dark textarea {
             background-color: #272729 !important;
             color: #d7dadc !important;
             border: 1px solid #343536 !important;
         }
-
-        /* Buttons */
-        input[type="submit"] {
+        html.hn-dark input[type="submit"] {
             background-color: #343536 !important;
             color: #d7dadc !important;
             border: 1px solid #818384 !important;
             cursor: pointer;
         }
+        html.hn-dark a.morelink { color: #ff6314 !important; }
 
-        /* More / pagination link */
-        a.morelink {
-            color: #ff6314 !important;
-        }
-
-        /* --- COLLAPSIBLE COMMENT TEXTAREA ---
-           The main reply textarea starts compact at 4 rows tall.
-           When the user clicks into it, it smoothly expands to 8 rows.
-           HN's default textarea font is roughly 16px with ~1.4 line-height,
-           so 1 row ≈ 22px. We add a little padding on top to account for
-           the textarea's internal padding (~8px top + 8px bottom = 16px). */
-
-        /* Collapsed state: 4 rows = (4 × 22px) + 16px padding = ~104px
-           Uses a plain textarea selector (no id) so it matches regardless of
-           what name attribute HN assigns to the element. */
+        /* === COLLAPSIBLE COMMENT TEXTAREA ==================================== */
         textarea.hn-textarea-collapsed {
             height: 104px !important;
             min-height: 104px !important;
@@ -179,9 +182,6 @@
             cursor: pointer;
             opacity: 0.8;
         }
-
-        /* Expanded state: 8 rows = (8 × 22px) + 16px padding = ~192px.
-           An orange focus ring signals that the field is active. */
         textarea.hn-textarea-expanded {
             height: 192px !important;
             min-height: 192px !important;
@@ -194,32 +194,74 @@
             box-shadow: 0 0 0 2px #ff6314 !important;
         }
 
-        /* --- COMMENT DEPTH COLOUR CODING ---
-           The coloured border is now applied to the .commtext div (the actual
-           comment content block) rather than the outer table. This places the
-           border right beside the comment text instead of at the screen edge. */
-        .comtr .commtext {
+        /* === COMMENT DEPTH COLOUR CODING (html.hn-depthcolors) =============== */
+        html.hn-depthcolors .comtr .commtext {
             padding-left: 8px !important;
             border-left: 3px solid transparent;
         }
+        html.hn-depthcolors [data-depth="0"] .commtext { border-left-color: transparent !important; }
+        html.hn-depthcolors [data-depth="1"] .commtext { border-left-color: #ff4500 !important; }
+        html.hn-depthcolors [data-depth="2"] .commtext { border-left-color: #0dd3bb !important; }
+        html.hn-depthcolors [data-depth="3"] .commtext { border-left-color: #ffb000 !important; }
+        html.hn-depthcolors [data-depth="4"] .commtext { border-left-color: #46d160 !important; }
+        html.hn-depthcolors [data-depth="5"] .commtext { border-left-color: #cc69b9 !important; }
+        html.hn-depthcolors [data-depth="6"] .commtext { border-left-color: #0079d3 !important; }
+        html.hn-depthcolors [data-depth="7"] .commtext { border-left-color: #ff585b !important; }
+        html.hn-depthcolors [data-depth="8"] .commtext { border-left-color: #ff4500 !important; }
+        html.hn-depthcolors [data-depth="9"] .commtext { border-left-color: #0dd3bb !important; }
 
-        /* Each depth level gets its own colour. The data-depth attribute is set
-           by our JavaScript below based on HN's indentation spacer widths. */
-        [data-depth="0"] .commtext { border-left-color: transparent !important; }
-        [data-depth="1"] .commtext { border-left-color: #ff4500 !important; }
-        [data-depth="2"] .commtext { border-left-color: #0dd3bb !important; }
-        [data-depth="3"] .commtext { border-left-color: #ffb000 !important; }
-        [data-depth="4"] .commtext { border-left-color: #46d160 !important; }
-        [data-depth="5"] .commtext { border-left-color: #cc69b9 !important; }
-        [data-depth="6"] .commtext { border-left-color: #0079d3 !important; }
-        [data-depth="7"] .commtext { border-left-color: #ff585b !important; }
-        /* Cycle back for very deep threads */
-        [data-depth="8"] .commtext { border-left-color: #ff4500 !important; }
-        [data-depth="9"] .commtext { border-left-color: #0dd3bb !important; }
+        /* === NEW-COMMENT HIGHLIGHTING (html.hn-newcomments) ================== */
+        .hn-new-badge { display: none; }
+        html.hn-newcomments .comtr.hn-new-comment .commtext {
+            background: rgba(255, 153, 0, 0.07) !important;
+        }
+        html.hn-newcomments .hn-new-badge {
+            display: inline-block;
+            margin-left: 6px;
+            font-size: 10px;
+            font-weight: 700;
+            color: #ff6314;
+            border: 1px solid #ff6314;
+            border-radius: 8px;
+            padding: 0 5px;
+            vertical-align: middle;
+        }
 
-        /* --- COMMENT SORT BAR ---
-           A row of sort buttons inserted above the comment list.
-           Styled to blend with the dark theme. */
+        /* === OP & REPLY HIGHLIGHTING (html.hn-ophighlight) =================== */
+        .hn-op-badge, .hn-reply-badge { display: none; }
+        html.hn-ophighlight .hn-op-badge {
+            display: inline-block;
+            margin-left: 5px;
+            font-size: 10px;
+            font-weight: 700;
+            background: #ff6314;
+            color: #fff !important;
+            border-radius: 8px;
+            padding: 0 5px;
+        }
+        html.hn-ophighlight .hn-reply-badge {
+            display: inline-block;
+            margin-left: 5px;
+            font-size: 10px;
+            font-weight: 700;
+            background: #2d6cdf;
+            color: #fff !important;
+            border-radius: 8px;
+            padding: 0 5px;
+        }
+
+        /* === KEYBOARD-NAV CURRENT ROW (html.hn-keyboardnav) ================== */
+        html.hn-keyboardnav .hn-nav-current > td {
+            background: rgba(255, 99, 20, 0.12) !important;
+        }
+        html.hn-keyboardnav .hn-nav-current .commtext {
+            box-shadow: -3px 0 0 0 #ff6314;
+        }
+
+        /* === VISITED-STORY DIMMING (html.hn-visiteddim) ===================== */
+        html.hn-visiteddim tr.athing.hn-visited .titleline > a { opacity: 0.5; }
+
+        /* === COMMENT SORT BAR (html.hn-sortbar) ============================= */
         #hn-sort-bar {
             display: flex;
             align-items: center;
@@ -228,15 +270,8 @@
             margin-bottom: 4px;
             border-bottom: 1px solid #343536;
         }
-
-        /* Label text before the buttons */
-        #hn-sort-bar span {
-            font-size: 12px;
-            color: #818384 !important;
-            margin-right: 4px;
-        }
-
-        /* Each sort button */
+        html:not(.hn-sortbar) #hn-sort-bar { display: none !important; }
+        #hn-sort-bar span { font-size: 12px; color: #818384 !important; margin-right: 4px; }
         .hn-sort-btn {
             font-size: 12px;
             font-weight: 600;
@@ -249,26 +284,13 @@
             transition: background-color 0.15s, color 0.15s, border-color 0.15s;
             user-select: none;
         }
+        .hn-sort-btn:hover { border-color: #818384; color: #d7dadc !important; }
+        .hn-sort-btn.active { background-color: #ff6314; border-color: #ff6314; color: #ffffff !important; }
 
-        .hn-sort-btn:hover {
-            border-color: #818384;
-            color: #d7dadc !important;
-        }
-
-        /* The currently active sort button gets an orange highlight */
-        .hn-sort-btn.active {
-            background-color: #ff6314;
-            border-color: #ff6314;
-            color: #ffffff !important;
-        }
-
-
-        /* --- FLOATING NEXT-PARENT BUTTON ---
-           A circular button fixed to the bottom-right corner of the screen.
-           Clicking it scrolls down to the next top-level (depth 0) comment. */
+        /* === FLOATING NEXT-PARENT BUTTON (html.hn-navbutton) ================ */
         #hn-next-parent-btn {
             position: fixed;
-            bottom: 28px;
+            bottom: 84px;
             right: 28px;
             width: 48px;
             height: 48px;
@@ -287,109 +309,329 @@
             transition: background-color 0.15s, transform 0.1s;
             user-select: none;
         }
+        html:not(.hn-navbutton) #hn-next-parent-btn { display: none !important; }
+        #hn-next-parent-btn:hover { background-color: #e55a10; transform: scale(1.08); }
+        #hn-next-parent-btn:active { transform: scale(0.95); }
 
-        #hn-next-parent-btn:hover {
-            background-color: #e55a10;
-            transform: scale(1.08);
+        /* === STICKY STORY HEADER (html.hn-stickyheader) ===================== */
+        #hn-sticky {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            z-index: 9998;
+            background: #272729;
+            color: #d7dadc;
+            border-bottom: 1px solid #343536;
+            padding: 8px 14px;
+            font-family: sans-serif;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            transform: translateY(-100%);
+            transition: transform 0.18s ease;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.4);
         }
+        #hn-sticky.hn-sticky-visible { transform: none; }
+        html:not(.hn-stickyheader) #hn-sticky { display: none !important; }
+        #hn-sticky .hn-sticky-title {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        #hn-sticky a { color: #d7dadc; text-decoration: none; }
+        #hn-sticky a:hover { text-decoration: underline; }
+        #hn-sticky .hn-sticky-new { color: #ff6314; font-weight: 700; white-space: nowrap; }
+        #hn-sticky .hn-sticky-top { color: #ff6314; font-weight: 700; cursor: pointer; white-space: nowrap; }
 
-        #hn-next-parent-btn:active {
-            transform: scale(0.95);
+        /* === SETTINGS BUTTON & PANEL ======================================== */
+        #hn-settings-btn {
+            position: fixed;
+            bottom: 28px; right: 28px;
+            width: 48px; height: 48px;
+            border-radius: 50%;
+            background-color: #272729;
+            color: #d7dadc;
+            border: 1px solid #343536;
+            font-size: 22px;
+            line-height: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 9999;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+            transition: transform 0.1s, color 0.15s, border-color 0.15s;
+            user-select: none;
+        }
+        #hn-settings-btn:hover { color: #fff; border-color: #818384; transform: rotate(40deg); }
+
+        #hn-settings-panel {
+            position: fixed;
+            bottom: 88px; right: 28px;
+            width: 280px;
+            max-height: 72vh;
+            overflow-y: auto;
+            background: #1f1f21;
+            color: #d7dadc;
+            border: 1px solid #343536;
+            border-radius: 10px;
+            padding: 14px 16px;
+            z-index: 10000;
+            box-shadow: 0 8px 28px rgba(0,0,0,0.6);
+            font-family: sans-serif;
+            font-size: 13px;
+            display: none;
+        }
+        #hn-settings-panel.hn-open { display: block; }
+        #hn-settings-panel h3 { margin: 0 0 10px; font-size: 14px; color: #fff; }
+        #hn-settings-panel label.hn-check {
+            display: flex; align-items: center; gap: 8px;
+            margin: 7px 0; cursor: pointer;
+        }
+        #hn-settings-panel .hn-field { margin: 12px 0 4px; }
+        #hn-settings-panel .hn-field > span { display: block; margin-bottom: 4px; color: #aaa; }
+        #hn-settings-panel .hn-field .hn-val { float: right; color: #818384; }
+        #hn-settings-panel input[type="range"] { width: 100%; accent-color: #ff6314; }
+        #hn-settings-panel select {
+            width: 100%;
+            background: #272729; color: #d7dadc;
+            border: 1px solid #343536; border-radius: 4px; padding: 4px;
+        }
+        #hn-settings-panel hr { border: none; border-top: 1px solid #343536; margin: 12px 0; }
+        #hn-settings-panel .hn-hint { color: #777; font-size: 11px; line-height: 1.5; }
+        #hn-settings-panel .hn-hint kbd {
+            background: #272729; border: 1px solid #343536; border-radius: 3px;
+            padding: 0 4px; font-family: monospace; color: #d7dadc;
         }
 
     `;
     document.documentElement.appendChild(style);
 
+    // Separate style element for live-updated font/width/line-height prefs.
+    prefStyle = document.createElement('style');
+    prefStyle.textContent = prefsCSS(settings);
+    document.documentElement.appendChild(prefStyle);
+
+    // Apply settings immediately (at document-start) so the theme shows with no flash.
+    applySettings(settings);
+
+    // If dark mode is set to 'auto', react to the OS theme changing live.
+    if (window.matchMedia) {
+        try {
+            window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
+                if (settings.darkMode === 'auto') setClass('hn-dark', darkActive(settings));
+            });
+        } catch (e) { /* older browsers: no live OS-theme updates */ }
+    }
+
 
     // =========================================================================
-    // SECTION 2: WAIT FOR THE PAGE TO LOAD BEFORE RUNNING JS
-    // document-start fires before the DOM exists, so we wait for DOMContentLoaded
+    // SHARED HELPERS
+    // =========================================================================
+
+    // Is an element currently visible (not collapsed/display:none)?
+    function isVisible(el) {
+        return !!el && el.getClientRects().length > 0;
+    }
+
+    // Parse a comment row's post time (ms since epoch) from its <span class="age">.
+    // Handles three formats robustly:
+    //   1. Newer HN: title="2025-06-10T18:30:00 1749580200" (trailing unix seconds)
+    //   2. ISO-ish: title="2024-03-01 14:22:05" or "2024-03-01T14:22:05"
+    //   3. Fallback: relative link text like "3 hours ago"
+    function parseRowTime(ageSpan, ageLink) {
+        if (ageSpan && ageSpan.title) {
+            var parts = ageSpan.title.trim().split(/\s+/);
+            var last = parts[parts.length - 1];
+            if (parts.length > 1 && /^\d{9,}$/.test(last)) {
+                var secs = parseInt(last, 10);
+                if (!isNaN(secs)) return secs * 1000;
+            }
+            var iso = (parts[0].indexOf('T') === -1 && parts.length > 1)
+                ? parts[0] + 'T' + parts[1]
+                : parts[0];
+            var t = new Date(iso).getTime();
+            if (!isNaN(t)) return t;
+        }
+        if (ageLink) {
+            var text = ageLink.textContent.trim();
+            var now = Date.now(), m;
+            if ((m = text.match(/(\d+)\s+minute/))) return now - m[1] * 60000;
+            if ((m = text.match(/(\d+)\s+hour/)))   return now - m[1] * 3600000;
+            if ((m = text.match(/(\d+)\s+day/)))     return now - m[1] * 86400000;
+            if ((m = text.match(/(\d+)\s+month/)))   return now - m[1] * 2592000000;
+            if ((m = text.match(/(\d+)\s+year/)))    return now - m[1] * 31536000000;
+        }
+        return 0;
+    }
+
+    // The parent comment row of a given row = the nearest preceding .comtr with
+    // a smaller data-depth. Used for "replies to you" and the `p` nav shortcut.
+    function parentOf(row) {
+        var d = parseInt(row.getAttribute('data-depth'), 10);
+        var p = row.previousElementSibling;
+        while (p) {
+            if (p.classList && p.classList.contains('comtr')) {
+                var pd = parseInt(p.getAttribute('data-depth'), 10);
+                if (pd < d) return p;
+            }
+            p = p.previousElementSibling;
+        }
+        return null;
+    }
+
+    // --- VISITED-STORY STORE ---
+    function getVisited() {
+        try { return JSON.parse(localStorage.getItem('hn-visited') || '{}'); }
+        catch (e) { return {}; }
+    }
+    function markVisited(id) {
+        if (!id) return;
+        var v = getVisited();
+        v[id] = Date.now();
+        // Prune to the most-recent 3000 ids so the store can't grow unbounded
+        var keys = Object.keys(v);
+        if (keys.length > 3000) {
+            keys.sort(function (a, b) { return v[a] - v[b]; });
+            for (var i = 0; i < keys.length - 3000; i++) delete v[keys[i]];
+        }
+        try { localStorage.setItem('hn-visited', JSON.stringify(v)); } catch (e) { /* ignore */ }
+    }
+
+
+    // =========================================================================
+    // MAIN: runs once the DOM is ready
     // =========================================================================
     document.addEventListener('DOMContentLoaded', function () {
 
-        // Only run the comment features on thread/item pages, not the front page
+        buildSettingsUI();
+
         var isItemPage = window.location.pathname === '/item';
-        if (!isItemPage) return;
+        if (isItemPage) {
+            // Record that we've now viewed this story (for visited dimming elsewhere)
+            var itemId = new URLSearchParams(window.location.search).get('id');
+            markVisited(itemId);
+            initItemPage(itemId);
+        } else {
+            initListPage();
+        }
 
-        // =====================================================================
-        // SECTION 3: CALCULATE COMMENT DEPTH
-        // HN uses indentation via a spacer <img> whose width tells us how deep
-        // each comment is nested. We read that width and convert it to a depth
-        // number, stored as a data-depth attribute on each comment row so our
-        // CSS colour rules can target it.
-        // =====================================================================
+        initKeyboardNav(isItemPage);
+    });
 
-        // Grab all comment rows — HN gives each one the class "comtr"
-        var commentRows = document.querySelectorAll('.comtr');
 
-        // Collect all unique indent widths using a Set for O(1) dedup
+    // =========================================================================
+    // ITEM PAGE: comment-thread features
+    // =========================================================================
+    function initItemPage(itemId) {
+
+        var commentRows = Array.from(document.querySelectorAll('.comtr'));
+
+        // --- DEPTH ASSIGNMENT (always computed; CSS colouring is gated separately) ---
         var indentSet = new Set();
         commentRows.forEach(function (row) {
-            var indentImg = row.querySelector('td.ind img');
-            var indentWidth = indentImg ? parseInt(indentImg.getAttribute('width'), 10) : 0;
-            indentSet.add(indentWidth);
+            var img = row.querySelector('td.ind img');
+            indentSet.add(img ? parseInt(img.getAttribute('width'), 10) : 0);
         });
-
-        // Sort the unique widths to create a stable depth mapping, then build a
-        // width → depth lookup map. Using the map gives O(1) lookups per comment
-        // below, instead of an O(n) indexOf scan for every single row.
         var indentLevels = Array.from(indentSet).sort(function (a, b) { return a - b; });
         var depthByWidth = new Map();
-        indentLevels.forEach(function (width, depth) {
-            depthByWidth.set(width, depth);
-        });
+        indentLevels.forEach(function (w, depth) { depthByWidth.set(w, depth); });
 
-        // Assign depth to each comment row
         commentRows.forEach(function (row) {
-            var indentImg = row.querySelector('td.ind img');
-            var indentWidth = indentImg ? parseInt(indentImg.getAttribute('width'), 10) : 0;
-            var depth = depthByWidth.get(indentWidth);
-            row.setAttribute('data-depth', depth);
+            var img = row.querySelector('td.ind img');
+            var w = img ? parseInt(img.getAttribute('width'), 10) : 0;
+            row.setAttribute('data-depth', depthByWidth.get(w));
         });
 
+        // --- WHO IS OP / WHO AM I ---
+        var fatitem = document.querySelector('.fatitem');
+        var subEl = fatitem ? fatitem.querySelector('.hnuser') : null;
+        var submitter = subEl ? subEl.textContent.trim() : null;
 
-        // =====================================================================
-        // SECTION 4: COLLAPSIBLE COMMENT TEXTAREA
-        // Finds the main comment submission textarea and starts it in a compact
-        // collapsed state. Expands on focus, collapses on blur if empty.
-        // =====================================================================
+        var meEl = document.querySelector('span.pagetop a[href^="user?id="]');
+        var me = meEl ? meEl.textContent.trim() : null;
 
-        var commentTextarea = document.querySelector('textarea#text')
-                           || document.querySelector('textarea[name="text"]')
-                           || document.querySelector('form textarea');
+        // --- NEW-COMMENT BASELINE ---
+        // Read the timestamp of our previous visit BEFORE overwriting it, so we
+        // can highlight everything posted since. First-ever visit highlights nothing.
+        var seenKey = 'hn-seen-' + (itemId || 'x');
+        var lastSeen = 0;
+        try { lastSeen = parseInt(localStorage.getItem(seenKey), 10) || 0; } catch (e) { lastSeen = 0; }
 
-        if (commentTextarea) {
-            // Start the textarea in the collapsed state
-            commentTextarea.classList.add('hn-textarea-collapsed');
+        var newCount = 0;
 
-            // Expand when the user clicks in
-            commentTextarea.addEventListener('focus', function () {
-                commentTextarea.classList.remove('hn-textarea-collapsed');
-                commentTextarea.classList.add('hn-textarea-expanded');
+        // --- SINGLE PASS over comments: time, new badge, OP badge, reply badge ---
+        commentRows.forEach(function (row) {
+            var ageSpan = row.querySelector('.age');
+            var ageLink = ageSpan ? ageSpan.querySelector('a') : null;
+            var time = parseRowTime(ageSpan, ageLink);
+            row._hnTime = time; // cache for the sort feature below
+
+            var comhead = row.querySelector('.comhead');
+            var userEl = row.querySelector('.hnuser');
+            var userName = userEl ? userEl.textContent.trim() : null;
+
+            // New comment?
+            if (lastSeen && time > lastSeen) {
+                row.classList.add('hn-new-comment');
+                newCount++;
+                if (comhead) {
+                    var nb = document.createElement('span');
+                    nb.className = 'hn-new-badge';
+                    nb.textContent = 'new';
+                    comhead.appendChild(nb);
+                }
+            }
+
+            // OP badge
+            if (submitter && userName === submitter && userEl) {
+                var ob = document.createElement('span');
+                ob.className = 'hn-op-badge';
+                ob.textContent = 'OP';
+                userEl.insertAdjacentElement('afterend', ob);
+            }
+
+            // Reply-to-you badge (this comment's parent was written by me)
+            if (me) {
+                var parent = parentOf(row);
+                var parentUser = parent ? parent.querySelector('.hnuser') : null;
+                if (parentUser && parentUser.textContent.trim() === me && comhead) {
+                    var rb = document.createElement('span');
+                    rb.className = 'hn-reply-badge';
+                    rb.textContent = 'reply to you';
+                    comhead.appendChild(rb);
+                }
+            }
+        });
+
+        // Update our "last seen" stamp to now for the next visit
+        try { localStorage.setItem(seenKey, String(Date.now())); } catch (e) { /* ignore */ }
+
+        // --- COLLAPSIBLE COMMENT TEXTAREA ---
+        var textarea = document.querySelector('textarea#text')
+                    || document.querySelector('textarea[name="text"]')
+                    || document.querySelector('form textarea');
+        if (textarea) {
+            textarea.classList.add('hn-textarea-collapsed');
+            textarea.addEventListener('focus', function () {
+                textarea.classList.remove('hn-textarea-collapsed');
+                textarea.classList.add('hn-textarea-expanded');
             });
-
-            // Collapse back if the user clicks away and left it empty
-            commentTextarea.addEventListener('blur', function () {
-                if (commentTextarea.value.trim() === '') {
-                    commentTextarea.classList.remove('hn-textarea-expanded');
-                    commentTextarea.classList.add('hn-textarea-collapsed');
+            textarea.addEventListener('blur', function () {
+                if (textarea.value.trim() === '') {
+                    textarea.classList.remove('hn-textarea-expanded');
+                    textarea.classList.add('hn-textarea-collapsed');
                 }
             });
         }
 
+        // --- STICKY STORY HEADER ---
+        initStickyHeader(newCount);
 
-        // =====================================================================
-        // SECTION 5: FLOATING NEXT-PARENT BUTTON
-        // Creates a circular arrow button fixed to the bottom-right of the
-        // screen. Each click scrolls to the next depth-0 comment below the
-        // current scroll position.
-        // =====================================================================
-
-        // Declared with var so the sort section below can reassign it after
-        // reordering the DOM, keeping navigation in sync with the new order.
+        // --- FLOATING NEXT-PARENT BUTTON ---
         var parentComments = Array.from(document.querySelectorAll('.comtr[data-depth="0"]'));
 
-        // Create and append the button to the page body
         var nextBtn = document.createElement('button');
         nextBtn.id = 'hn-next-parent-btn';
         nextBtn.title = 'Next top-level comment';
@@ -397,189 +639,157 @@
         nextBtn.textContent = '↓';
         document.body.appendChild(nextBtn);
 
-        // Keyboard shortcut: Shift+ArrowDown scrolls to next parent comment
+        function goNextParent() {
+            var scrollY = window.scrollY + 10;
+            var next = null;
+            for (var i = 0; i < parentComments.length; i++) {
+                if (!isVisible(parentComments[i])) continue;
+                var topEdge = parentComments[i].getBoundingClientRect().top + window.scrollY;
+                if (topEdge > scrollY) { next = parentComments[i]; break; }
+            }
+            if (next) next.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            else window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        }
+        nextBtn.addEventListener('click', function () {
+            goNextParent();
+            nextBtn.blur(); // release focus so j/k keyboard nav keeps working
+        });
+
+        // Shift+ArrowDown mirrors the button
         document.addEventListener('keydown', function (e) {
             if (e.shiftKey && e.key === 'ArrowDown' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-                // Don't hijack keyboard when user is typing in an input
-                var tag = document.activeElement.tagName;
-                if (tag === 'TEXTAREA' || tag === 'INPUT') return;
+                if (isTyping()) return;
                 e.preventDefault();
-                nextBtn.click();
+                goNextParent();
             }
         });
 
-        nextBtn.addEventListener('click', function () {
-            // Add a small offset so a comment already at the top still counts as passed
-            var scrollY = window.scrollY + 10;
+        // --- COMMENT SORT BAR ---
+        buildSortBar(commentRows, function (newParents) { parentComments = newParents; });
+    }
 
-            // Find the first parent comment whose top edge is below the current scroll
-            var nextParent = null;
-            for (var i = 0; i < parentComments.length; i++) {
-                var topEdge = parentComments[i].getBoundingClientRect().top + window.scrollY;
-                if (topEdge > scrollY) {
-                    nextParent = parentComments[i];
-                    break;
-                }
-            }
 
-            if (nextParent) {
-                nextParent.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            } else {
-                // No more parent comments — scroll to bottom
-                window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-            }
+    // =========================================================================
+    // STICKY STORY HEADER
+    // =========================================================================
+    function initStickyHeader(newCount) {
+        var titleLink = document.querySelector('.fatitem .titleline a') || document.querySelector('.titleline a');
+        if (!titleLink) return;
+
+        var titleEl = titleLink.closest('.titleline') || titleLink;
+
+        var bar = document.createElement('div');
+        bar.id = 'hn-sticky';
+
+        var top = document.createElement('span');
+        top.className = 'hn-sticky-top';
+        top.textContent = '▲ top';
+        top.addEventListener('click', function () {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         });
 
+        var title = document.createElement('span');
+        title.className = 'hn-sticky-title';
+        var titleAnchor = document.createElement('a');
+        titleAnchor.setAttribute('href', titleLink.getAttribute('href'));
+        titleAnchor.textContent = titleLink.textContent;
+        title.appendChild(titleAnchor);
 
-        // =====================================================================
-        // SECTION 6: COMMENT SORT BAR
-        // Inserts a row of sort buttons above the comment list. Sorts are
-        // applied by reordering comment groups (root + its children) in the DOM.
-        //
-        // CAVEAT: HN does not expose comment scores in its HTML so true
-        // score-based sorting is impossible. Proxies used instead:
-        //   Best:          HN's original order (restored, no change)
-        //   New:           timestamp from the .age span title attribute
-        //   Top:           total reply count (most replied = most popular)
-        //   Controversial: replies per hour (fast discussion = divisive topic)
-        // =====================================================================
+        bar.appendChild(top);
+        bar.appendChild(title);
 
-        // Only proceed if there are actually comments on this page
+        if (newCount > 0) {
+            var newEl = document.createElement('span');
+            newEl.className = 'hn-sticky-new';
+            newEl.textContent = newCount + ' new';
+            bar.appendChild(newEl);
+        }
+
+        document.body.appendChild(bar);
+
+        // Show the bar once the original title has scrolled out of view.
+        var threshold = titleEl.getBoundingClientRect().bottom + window.scrollY;
+        var ticking = false;
+        function onScroll() {
+            if (ticking) return;
+            ticking = true;
+            requestAnimationFrame(function () {
+                bar.classList.toggle('hn-sticky-visible', window.scrollY > threshold);
+                ticking = false;
+            });
+        }
+        window.addEventListener('scroll', onScroll, { passive: true });
+    }
+
+
+    // =========================================================================
+    // COMMENT SORT BAR
+    // CAVEAT: HN does not expose per-comment scores in its HTML *or* via its
+    // public APIs, so true score-based sorting is impossible. Proxies used:
+    //   Best          HN's original order (restored)
+    //   New           post timestamp
+    //   Top           total reply count
+    //   Controversial replies per hour
+    // =========================================================================
+    function buildSortBar(allRows, onReorder) {
         var firstComtr = document.querySelector('.comtr');
         if (!firstComtr) return;
-
-        // HN's comment rows all live inside a single <tbody>
         var commentTbody = firstComtr.parentElement;
 
-        // --- Build comment groups ---
-        // Walk all comment rows and group each depth-0 root with all its
-        // child rows so they can be moved together as a unit when sorting.
-        var allRows = Array.from(commentTbody.querySelectorAll('.comtr'));
-        var groups  = [];
+        // Group each depth-0 root with all of its descendant rows
+        var groups = [];
         var currentGroup = null;
-
         allRows.forEach(function (row) {
             var depth = parseInt(row.getAttribute('data-depth'), 10);
-
             if (depth === 0) {
-                // Save the previous group before starting a new one
                 if (currentGroup) groups.push(currentGroup);
-
-                // Read the post timestamp using two strategies:
-                //
-                // Strategy 1: Read the ISO datetime from the title attribute on
-                // the <span class="age"> e.g. title="2024-03-01T14:22:05"
-                // Safari's Date parser requires a strict ISO 8601 format, so we
-                // manually ensure the string is valid before using it.
-                //
-                // Strategy 2: If Strategy 1 fails or gives an invalid date, fall
-                // back to parsing the relative link text ("3 hours ago", "2 days ago")
-                // by subtracting the stated duration from the current time.
-                var ageSpan  = row.querySelector('.age');
-                var ageLink  = ageSpan ? ageSpan.querySelector('a') : null;
-                var timestamp = new Date(0); // Default fallback: epoch
-
-                if (ageSpan && ageSpan.title) {
-                    // Strategy 1: parse title attribute, replacing space with T if needed
-                    var isoStr = ageSpan.title.replace(' ', 'T');
-                    var parsed = new Date(isoStr);
-                    if (!isNaN(parsed.getTime())) {
-                        timestamp = parsed; // Valid date — use it
-                    }
-                }
-
-                // Strategy 2: if we still have epoch (strategy 1 failed), parse
-                // the human-readable link text like "3 hours ago" or "2 days ago"
-                if (timestamp.getTime() === 0 && ageLink) {
-                    var text = ageLink.textContent.trim();
-                    var now   = Date.now();
-                    var m;
-                    if      ((m = text.match(/(\d+)\s+minute/)))  timestamp = new Date(now - m[1] * 60000);
-                    else if ((m = text.match(/(\d+)\s+hour/)))    timestamp = new Date(now - m[1] * 3600000);
-                    else if ((m = text.match(/(\d+)\s+day/)))     timestamp = new Date(now - m[1] * 86400000);
-                    else if ((m = text.match(/(\d+)\s+month/)))   timestamp = new Date(now - m[1] * 30 * 86400000);
-                    else if ((m = text.match(/(\d+)\s+year/)))    timestamp = new Date(now - m[1] * 365 * 86400000);
-                }
-
-                currentGroup = {
-                    root:        row,
-                    children:    [],
-                    timestamp:   timestamp,
-                    replyCount:  0
-                };
+                currentGroup = { root: row, children: [], timestamp: row._hnTime || 0, replyCount: 0 };
             } else if (currentGroup) {
                 currentGroup.children.push(row);
                 currentGroup.replyCount++;
             }
         });
-        // Push the last group after the loop ends
         if (currentGroup) groups.push(currentGroup);
 
-        // Keep a copy of the original order so "Best" can restore it
         var originalGroups = groups.slice();
 
-        // --- Sort functions ---
-
-        // NEW: most recently posted root comment first
         function sortByNew(g) {
-            return g.slice().sort(function (a, b) {
-                return b.timestamp - a.timestamp;
-            });
+            return g.slice().sort(function (a, b) { return b.timestamp - a.timestamp; });
         }
-
-        // TOP: most total replies first
         function sortByTop(g) {
-            return g.slice().sort(function (a, b) {
-                return b.replyCount - a.replyCount;
-            });
+            return g.slice().sort(function (a, b) { return b.replyCount - a.replyCount; });
         }
-
-        // CONTROVERSIAL: highest replies-per-hour ratio first
         function sortByControversial(g) {
             var now = Date.now();
             return g.slice().sort(function (a, b) {
-                var ageA   = Math.max((now - a.timestamp) / 3600000, 0.1);
-                var ageB   = Math.max((now - b.timestamp) / 3600000, 0.1);
-                var scoreA = a.replyCount / ageA;
-                var scoreB = b.replyCount / ageB;
-                return scoreB - scoreA;
+                var ageA = Math.max((now - a.timestamp) / 3600000, 0.1);
+                var ageB = Math.max((now - b.timestamp) / 3600000, 0.1);
+                return (b.replyCount / ageB) - (a.replyCount / ageA);
             });
         }
 
-        // --- Apply a sort to the DOM ---
-        // Removes all comment rows then re-inserts them in the new order.
-        // Also refreshes parentComments so the ↓ button stays in sync.
         function applySort(sortedGroups) {
-            // Detach every comment row from the DOM
             allRows.forEach(function (row) {
                 if (row.parentElement) row.parentElement.removeChild(row);
             });
-
-            // Re-insert in new order: root first, then its children
             sortedGroups.forEach(function (group) {
                 commentTbody.appendChild(group.root);
-                group.children.forEach(function (child) {
-                    commentTbody.appendChild(child);
-                });
+                group.children.forEach(function (child) { commentTbody.appendChild(child); });
             });
-
-            // Refresh the next-parent list to match the new visual order
-            parentComments = sortedGroups.map(function (g) { return g.root; });
+            onReorder(sortedGroups.map(function (g) { return g.root; }));
         }
 
-        // --- Build sort bar UI ---
-        var sortBarRow  = document.createElement('tr');
+        var sortBarRow = document.createElement('tr');
         var sortBarCell = document.createElement('td');
         sortBarCell.setAttribute('colspan', '2');
 
         var sortBar = document.createElement('div');
-        sortBar.id  = 'hn-sort-bar';
+        sortBar.id = 'hn-sort-bar';
 
         var sortLabel = document.createElement('span');
         sortLabel.textContent = 'Sort by:';
         sortBar.appendChild(sortLabel);
 
-        // Button definitions — fn: null means restore original HN order
         var sortOptions = [
             { label: 'Best',          fn: null },
             { label: 'New',           fn: sortByNew },
@@ -589,23 +799,14 @@
 
         sortOptions.forEach(function (option) {
             var btn = document.createElement('button');
-            btn.className   = 'hn-sort-btn';
+            btn.className = 'hn-sort-btn';
             btn.textContent = option.label;
-
-            // "Best" is active by default as it reflects HN's original order
             if (option.label === 'Best') btn.classList.add('active');
 
             btn.addEventListener('click', function () {
-                // Update active state on buttons
-                sortBar.querySelectorAll('.hn-sort-btn').forEach(function (b) {
-                    b.classList.remove('active');
-                });
+                sortBar.querySelectorAll('.hn-sort-btn').forEach(function (b) { b.classList.remove('active'); });
                 btn.classList.add('active');
-
-                // Apply the chosen sort, or restore original for "Best"
                 applySort(option.fn ? option.fn(groups) : originalGroups.slice());
-
-                // Scroll back to the sort bar so the user sees the reordered list
                 sortBarRow.scrollIntoView({ behavior: 'smooth', block: 'start' });
             });
 
@@ -614,10 +815,247 @@
 
         sortBarCell.appendChild(sortBar);
         sortBarRow.appendChild(sortBarCell);
-
-        // Insert the sort bar row immediately before the first comment
         commentTbody.insertBefore(sortBarRow, firstComtr);
+    }
 
-    }); // end DOMContentLoaded
+
+    // =========================================================================
+    // LIST PAGE: visited-story dimming
+    // =========================================================================
+    function initListPage() {
+        var visited = getVisited();
+
+        // Dim stories already visited, and record new clicks as they happen.
+        document.querySelectorAll('tr.athing[id]').forEach(function (row) {
+            if (visited[row.id]) row.classList.add('hn-visited');
+            var link = row.querySelector('.titleline a');
+            if (link) {
+                link.addEventListener('click', function () {
+                    markVisited(row.id);
+                    row.classList.add('hn-visited');
+                });
+            }
+        });
+
+        // Clicking a "N comments" link also counts as visiting that story.
+        document.querySelectorAll('a[href^="item?id="]').forEach(function (a) {
+            a.addEventListener('click', function () {
+                var m = a.getAttribute('href').match(/id=(\d+)/);
+                if (!m) return;
+                markVisited(m[1]);
+                var r = document.getElementById(m[1]);
+                if (r) r.classList.add('hn-visited');
+            });
+        });
+    }
+
+
+    // =========================================================================
+    // KEYBOARD NAVIGATION  (j/k move · p parent · c collapse · o/Enter open)
+    // =========================================================================
+    function isTyping() {
+        var el = document.activeElement;
+        if (!el) return false;
+        var tag = el.tagName;
+        return tag === 'TEXTAREA' || tag === 'INPUT' || el.isContentEditable;
+    }
+
+    function initKeyboardNav(isItemPage) {
+        var current = null;
+
+        function navItems() {
+            var sel = isItemPage ? 'tr.comtr' : 'tr.athing[id]';
+            return Array.from(document.querySelectorAll(sel)).filter(isVisible);
+        }
+
+        function setCurrent(el) {
+            if (current) current.classList.remove('hn-nav-current');
+            current = el;
+            if (current) {
+                current.classList.add('hn-nav-current');
+                current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+
+        function move(dir) {
+            var items = navItems();
+            if (!items.length) return;
+            var idx = current ? items.indexOf(current) : -1;
+            if (idx === -1) {
+                // No current row yet — pick the first one at/below the viewport top
+                for (var i = 0; i < items.length; i++) {
+                    if (items[i].getBoundingClientRect().top > -5) { idx = i; break; }
+                }
+                if (idx === -1) idx = 0;
+            } else {
+                idx = Math.min(Math.max(idx + dir, 0), items.length - 1);
+            }
+            setCurrent(items[idx]);
+        }
+
+        function collapseCurrent() {
+            if (!current) return;
+            var togg = current.querySelector('a.togg');
+            if (togg) togg.click();
+        }
+
+        function gotoParent() {
+            if (!current || !isItemPage) return;
+            var p = parentOf(current);
+            if (p) setCurrent(p);
+        }
+
+        function openCurrent() {
+            if (!current) return;
+            var link = isItemPage
+                ? current.querySelector('.commtext a')
+                : current.querySelector('.titleline a');
+            if (link) window.open(link.href, '_blank', 'noopener,noreferrer');
+        }
+
+        document.addEventListener('keydown', function (e) {
+            if (!settings.keyboardNav) return;
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+            // Don't hijack keys while typing, or while a link/button/select has
+            // focus — Enter should still activate a focused control normally.
+            var ae = document.activeElement;
+            if (isTyping()) return;
+            if (ae && /^(A|BUTTON|SELECT)$/.test(ae.tagName)) return;
+
+            switch (e.key) {
+                case 'j': e.preventDefault(); move(1); break;
+                case 'k': e.preventDefault(); move(-1); break;
+                case 'p': e.preventDefault(); gotoParent(); break;
+                case 'c': e.preventDefault(); collapseCurrent(); break;
+                case 'o':
+                case 'Enter':
+                    // Only consume the key when we actually have a row to open
+                    if (current) { e.preventDefault(); openCurrent(); }
+                    break;
+                default: break;
+            }
+        });
+    }
+
+
+    // =========================================================================
+    // SETTINGS UI: gear button + panel
+    // =========================================================================
+    function buildSettingsUI() {
+        var btn = document.createElement('div');
+        btn.id = 'hn-settings-btn';
+        btn.title = 'HN Enhancer settings';
+        btn.setAttribute('role', 'button');
+        btn.setAttribute('aria-label', 'Open HN Enhancer settings');
+        btn.textContent = '⚙';
+        document.body.appendChild(btn);
+
+        var panel = document.createElement('div');
+        panel.id = 'hn-settings-panel';
+        document.body.appendChild(panel);
+
+        var heading = document.createElement('h3');
+        heading.textContent = 'HN Enhancer';
+        panel.appendChild(heading);
+
+        // Dark mode select
+        var darkField = document.createElement('div');
+        darkField.className = 'hn-field';
+        var darkLabel = document.createElement('span');
+        darkLabel.textContent = 'Dark mode';
+        var darkSelect = document.createElement('select');
+        [['on', 'On'], ['off', 'Off'], ['auto', 'Auto (match system)']].forEach(function (opt) {
+            var o = document.createElement('option');
+            o.value = opt[0];
+            o.textContent = opt[1];
+            if (settings.darkMode === opt[0]) o.selected = true;
+            darkSelect.appendChild(o);
+        });
+        darkSelect.addEventListener('change', function () {
+            settings.darkMode = darkSelect.value;
+            saveSettings(settings);
+            applySettings(settings);
+        });
+        darkField.appendChild(darkLabel);
+        darkField.appendChild(darkSelect);
+        panel.appendChild(darkField);
+
+        // Boolean feature toggles
+        var toggles = [
+            ['depthColors',  'Comment depth colours'],
+            ['newComments',  'Highlight new comments'],
+            ['opHighlight',  'Highlight OP & replies to you'],
+            ['keyboardNav',  'Keyboard navigation'],
+            ['sortBar',      'Comment sort bar'],
+            ['navButton',    'Floating next-parent button'],
+            ['stickyHeader', 'Sticky story header'],
+            ['visitedDim',   'Dim visited stories']
+        ];
+        toggles.forEach(function (t) {
+            var label = document.createElement('label');
+            label.className = 'hn-check';
+            var cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = !!settings[t[0]];
+            cb.addEventListener('change', function () {
+                settings[t[0]] = cb.checked;
+                saveSettings(settings);
+                applySettings(settings);
+            });
+            label.appendChild(cb);
+            label.appendChild(document.createTextNode(t[1]));
+            panel.appendChild(label);
+        });
+
+        panel.appendChild(document.createElement('hr'));
+
+        // Sliders: font size, line height, content width
+        function addSlider(key, label, min, max, step, fmt) {
+            var field = document.createElement('div');
+            field.className = 'hn-field';
+            var span = document.createElement('span');
+            span.textContent = label;
+            var val = document.createElement('span');
+            val.className = 'hn-val';
+            span.appendChild(val);
+            var range = document.createElement('input');
+            range.type = 'range';
+            range.min = min; range.max = max; range.step = step;
+            range.value = settings[key];
+            function render() { val.textContent = fmt(parseFloat(range.value)); }
+            render();
+            range.addEventListener('input', function () {
+                settings[key] = parseFloat(range.value);
+                render();
+                saveSettings(settings);
+                applySettings(settings);
+            });
+            field.appendChild(span);
+            field.appendChild(range);
+            panel.appendChild(field);
+        }
+        addSlider('fontSize',   'Font size',    11, 20,  1,   function (v) { return v + 'px'; });
+        addSlider('lineHeight', 'Line height',  1.2, 2.0, 0.1, function (v) { return v.toFixed(1); });
+        addSlider('width',      'Content width', 0, 1600, 50,  function (v) { return v === 0 ? 'Native' : v + 'px'; });
+
+        panel.appendChild(document.createElement('hr'));
+
+        var hint = document.createElement('div');
+        hint.className = 'hn-hint';
+        hint.innerHTML = 'Keys: <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>p</kbd> parent · ' +
+                         '<kbd>c</kbd> collapse · <kbd>o</kbd> open · <kbd>Shift</kbd>+<kbd>↓</kbd> next thread';
+        panel.appendChild(hint);
+
+        // Toggle the panel open/closed; close when clicking elsewhere
+        btn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            panel.classList.toggle('hn-open');
+        });
+        document.addEventListener('click', function (e) {
+            if (!panel.contains(e.target) && e.target !== btn) panel.classList.remove('hn-open');
+        });
+        panel.addEventListener('click', function (e) { e.stopPropagation(); });
+    }
 
 })();
