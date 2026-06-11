@@ -135,15 +135,9 @@
     // Last updated: 2026-01-31
     // .onion and .i2p instances are intentionally excluded — normal browsers cannot reach them
     var INSTANCES = [
-        "https://l.opnxng.com",           // SG
         "https://redlib.catsarch.com",    // US
         "https://redlib.perennialte.ch",  // AU
-        "https://redlib.r4fo.com",        // DE
-        "https://red.artemislena.eu",     // DE
-        "https://redlib.cow.rip",         // IN
         "https://redlib.nadeko.net",      // CL
-        "https://redlib.orangenet.cc",    // SI
-        "https://redlib.privadency.com",  // DE
     ];
 
     // Fallback used only if INSTANCES is somehow empty
