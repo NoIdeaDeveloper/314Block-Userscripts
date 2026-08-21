@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Hacker News — Dark Mode & Reddit-Style Comments
 // @namespace    https://github.com/NoIdeaDeveloper/314Block-Userscripts
-// @version      2.1
+// @version      2.2
 // @description  Dark mode, colour-coded comment threads, new-comment highlighting, OP/reply highlighting, keyboard navigation, collapsible threads, a sticky header, visited-story dimming, and a settings panel for Hacker News
 // @author       NoIdeaDeveloper
 // @license      MIT
@@ -139,9 +139,15 @@
         html.hn-dark .subtext, html.hn-dark .subtext a { color: #818384 !important; }
         html.hn-dark .subtext a:hover { color: #d7dadc !important; text-decoration: underline; }
 
-        /* Force ALL text inside comment rows light — HN sometimes inlines
-           color="black" on <font> tags, which would otherwise win. */
-        html.hn-dark .comtr * { color: #d7dadc !important; }
+        /* Force text inside comment rows light — HN sometimes inlines
+           color="black" on <font> tags, which would otherwise win. Targeted
+           selectors instead of `.comtr *` so the browser doesn't have to
+           recalculate style for every descendant of every comment row. */
+        html.hn-dark .comtr .commtext,
+        html.hn-dark .comtr .commtext *,
+        html.hn-dark .comtr > td,
+        html.hn-dark .comtr .default,
+        html.hn-dark .comtr .default * { color: #d7dadc !important; }
 
         /* Re-apply specific accent colours the wildcard above would flatten */
         html.hn-dark .hnuser, html.hn-dark a.hnuser { color: #ff6314 !important; font-weight: 600; }
@@ -751,7 +757,12 @@
         });
         if (currentGroup) groups.push(currentGroup);
 
-        var originalGroups = groups.slice();
+        // Snapshot of the original order. Deep-copy the group objects (not
+        // just the array) so the copy stays intact even if the group objects
+        // are ever mutated later (e.g. replyCount updated by a future feature).
+        var originalGroups = groups.map(function (g) {
+            return { root: g.root, children: g.children.slice(), timestamp: g.timestamp, replyCount: g.replyCount };
+        });
 
         function sortByNew(g) {
             return g.slice().sort(function (a, b) { return b.timestamp - a.timestamp; });

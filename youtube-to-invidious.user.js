@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube to Invidious Redirector
 // @namespace    https://github.com/NoIdeaDeveloper/314Block-Userscripts
-// @version      1.3
+// @version      1.4
 // @description  Redirects YouTube to an Invidious instance, preserving video IDs, search queries, and channel pages
 // @author       NoIdeaDeveloper
 // @license      MIT
@@ -15,8 +15,10 @@
 // ==/UserScript==
 
 // NOTE: This is the simpler, older version of the YouTube redirector.
-// For a full-featured version with embed replacement, DuckDuckGo integration,
-// tracking parameter stripping, and error handling, use user-youtube-to-invidious.user.js instead.
+// It probes the configured instance before redirecting and shows a fallback
+// message if it's down. For a full-featured version with embed replacement,
+// DuckDuckGo integration, and SPA navigation handling, use
+// user-youtube-to-invidious.user.js instead.
 
 (function() {
     'use strict';
@@ -32,6 +34,9 @@
     var videoParams = "&related_videos=false&comments=false";
     // For URLs that don't have a "?" (e.g. channel pages), parameters start with "?"
     var pageParams = "?related_videos=false&comments=false";
+
+    // How long (ms) to wait for the instance to respond before showing the fallback page
+    var PROBE_TIMEOUT_MS = 2500;
 
     // --- GUARD: Validate and normalise the configured Invidious instance ---
     // Parse the configured value and force it to a bare https origin. Anything
@@ -76,10 +81,81 @@
     // True for the privacy-enhanced youtube-nocookie.com embed domain
     var isNoCookie = host.endsWith('youtube-nocookie.com');
 
+    // --- PROBE THE INSTANCE'S REACHABILITY ---
+    // Sends a lightweight no-cors HEAD request with a hard timeout. A no-cors
+    // request resolves for any HTTP response and rejects on a genuine network
+    // failure (DNS error, connection refused, TLS failure) — exactly the
+    // "instance is down" case. YouTube's CSP allows connect-src to any origin,
+    // so a plain fetch works here (unlike on Reddit — see the Redlib scripts).
+    function probe(baseUrl, timeoutMs) {
+        return new Promise(function(resolve) {
+            var settled = false;
+            function finish(ok) {
+                if (settled) return;
+                settled = true;
+                resolve(ok);
+            }
+            var timer = setTimeout(function() { finish(false); }, timeoutMs);
+            fetch(baseUrl, { method: 'HEAD', mode: 'no-cors', cache: 'no-store' })
+                .then(function() { clearTimeout(timer); finish(true); })
+                .catch(function() { clearTimeout(timer); finish(false); });
+        });
+    }
+
+    // --- "INSTANCE UNREACHABLE" FALLBACK PAGE ---
+    // Built with safe DOM methods (textContent / setAttribute), never innerHTML,
+    // so nothing in the URL can be interpreted as markup.
+    var invidiousHost = new URL(invidious).hostname;
+    function showUnreachable(newURL, styleEl) {
+        function render() {
+            if (styleEl) styleEl.remove(); // Reveal the page so it isn't just blank
+            document.body.innerHTML = '';
+            var wrapper = document.createElement('div');
+            wrapper.style.cssText = 'font-family:sans-serif;text-align:center;padding:3rem;color:#333;';
+            var heading = document.createElement('h2');
+            heading.textContent = 'Invidious instance unreachable';
+            heading.style.cssText = 'margin:0 0 0.5rem;';
+            var para = document.createElement('p');
+            para.style.cssText = 'color:#666;margin:0 0 1.5rem;';
+            var strong = document.createElement('strong');
+            strong.textContent = invidiousHost; // textContent: safe, no HTML interpretation
+            para.appendChild(strong);
+            para.appendChild(document.createTextNode(' could not be reached.'));
+            var tryLink = document.createElement('a');
+            tryLink.setAttribute('href', newURL); // setAttribute: safe, treats value as literal
+            tryLink.textContent = 'Try opening it directly';
+            tryLink.style.cssText = 'color:#336699;';
+            var separator = document.createTextNode(' · ');
+            var findLink = document.createElement('a');
+            findLink.setAttribute('href', 'https://api.invidious.io');
+            findLink.setAttribute('target', '_blank');
+            findLink.setAttribute('rel', 'noopener noreferrer');
+            findLink.textContent = 'Find another instance';
+            findLink.style.cssText = 'color:#336699;';
+            wrapper.appendChild(heading);
+            wrapper.appendChild(para);
+            wrapper.appendChild(tryLink);
+            wrapper.appendChild(separator);
+            wrapper.appendChild(findLink);
+            document.body.appendChild(wrapper);
+        }
+        // The body may not exist yet at document-start — wait if necessary.
+        if (document.body) render();
+        else document.addEventListener('DOMContentLoaded', render);
+    }
+
     // Helper function that performs the redirect.
-    // Using replace() means the YouTube page won't appear in your browser history.
+    // Probes the Invidious instance first; if it responds, navigate with
+    // replace() so the YouTube page won't appear in your browser history.
+    // If it's unreachable, show a clear message instead of a browser error page.
     function redirect(newURL) {
-        window.location.replace(newURL);
+        probe(invidious, PROBE_TIMEOUT_MS).then(function(reachable) {
+            if (reachable) {
+                window.location.replace(newURL);
+            } else {
+                showUnreachable(newURL, style);
+            }
+        });
     }
 
     // --- TRACKING PARAMETER STRIPPER ---

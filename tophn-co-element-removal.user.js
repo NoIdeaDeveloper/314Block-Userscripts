@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         TopHN Element Remover
 // @namespace    https://github.com/NoIdeaDeveloper/314Block-Userscripts
-// @version      1.3
+// @version      1.4
 // @description  Remove specific div elements from TopHN
 // @author       NoIdeaDeveloper
 // @license      MIT
 // @match        https://www.tophn.co/*
+// @run-at       document-start
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/tophn-co-element-removal.user.js
 // @updateURL    https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/tophn-co-element-removal.user.js
@@ -17,8 +18,11 @@
     // CSS selector for the element(s) you want to remove
     const SELECTOR = 'div.mt-2.px-3.py-2.bg-neutral-50.dark\\:bg-neutral-900.rounded';
 
-    // How long to keep retrying on page load (milliseconds)
-    const MAX_WAIT = 5000;
+    // How long to keep retrying on page load (milliseconds). Short, because at
+    // document-start the DOM may not contain matching elements yet — the
+    // MutationObserver below catches every later arrival, so this loop only
+    // needs to cover elements that appear during initial load.
+    const MAX_WAIT = 2000;
 
     // How often to retry (milliseconds)
     const INTERVAL = 200;
@@ -31,7 +35,9 @@
     }
 
     // Keeps trying to remove elements until they're found or we hit MAX_WAIT.
-    // This handles the case where elements load after the script initially runs.
+    // Once an initial removal succeeds (or the wait times out), the interval
+    // stops — the MutationObserver below handles every later DOM change, so
+    // running both simultaneously would just duplicate work.
     function removeWithRetry() {
         let elapsed = 0;
 

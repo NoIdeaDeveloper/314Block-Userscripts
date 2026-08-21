@@ -58,12 +58,13 @@ of public instances is at [github.com/redlib-org/redlib-instances](https://githu
 
 ### reddit-to-redlib.user.js (Simple)
 
-> The single-instance version. For random selection and reachability probing,
-> use `user-reddit-to-redlib.user.js` instead.
+> The single-instance version. For random selection and automatic failover
+> across instances, use `user-reddit-to-redlib.user.js` instead.
 
 **Description**: Redirects Reddit to a single configured Redlib instance,
-preserving the URL path and query parameters. Edit the `destination` variable
-to choose your instance.
+preserving the URL path and query parameters. Probes the instance before
+redirecting and shows a fallback page if it's down. Edit the `destination`
+variable to choose your instance.
 
 ### user-youtube-to-invidious.user.js (Recommended)
 
@@ -87,11 +88,12 @@ A list of public instances is at [api.invidious.io](https://api.invidious.io).
 
 ### youtube-to-invidious.user.js (Simple)
 
-> The simpler, older version. For embed replacement, DuckDuckGo integration, and
-> the unreachable-instance message, use `user-youtube-to-invidious.user.js`.
+> The simpler, older version. For embed replacement, DuckDuckGo integration,
+> and SPA navigation handling, use `user-youtube-to-invidious.user.js`.
 
-**Description**: Redirects YouTube to an Invidious instance, handling all YouTube
-URL types. Set `invidious`, `videoParams`, and `pageParams` to taste.
+**Description**: Redirects YouTube to an Invidious instance, handling all
+YouTube URL types. Probes the instance before redirecting and shows a fallback
+page if it's down. Set `invidious`, `videoParams`, and `pageParams` to taste.
 
 ### user-medium-to-scribe.user.js
 

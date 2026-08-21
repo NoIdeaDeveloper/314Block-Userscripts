@@ -712,8 +712,21 @@
     //
     // Both patterns must be checked, otherwise re-searching from the Videos tab
     // would cause the card observer to stop and buttons would stop appearing.
+    // The parsed query string is cached and only re-parsed when the URL
+    // actually changes, so repeated isVideosTab() calls (e.g. from the card
+    // observer) don't each allocate a fresh URLSearchParams.
+    var cachedSearch = null;
+    var cachedParams = null;
+    function currentParams() {
+        if (cachedSearch !== window.location.search) {
+            cachedSearch = window.location.search;
+            cachedParams = new URLSearchParams(cachedSearch);
+        }
+        return cachedParams;
+    }
+
     function isVideosTab() {
-        var params = new URLSearchParams(window.location.search);
+        var params = currentParams();
         // iax=videos — present when switching TO the Videos tab from another tab
         // iar=videos — present when re-searching from within the Videos tab
         // Exact parameter matching via URLSearchParams avoids false positives from
