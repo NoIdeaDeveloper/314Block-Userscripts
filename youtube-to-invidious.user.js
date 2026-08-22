@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube to Invidious Redirector
 // @namespace    https://github.com/NoIdeaDeveloper/314Block-Userscripts
-// @version      1.4
+// @version      1.5
 // @description  Redirects YouTube to an Invidious instance, preserving video IDs, search queries, and channel pages
 // @author       NoIdeaDeveloper
 // @license      MIT
@@ -9,7 +9,10 @@
 // @match        *://youtu.be/*
 // @match        *://www.youtube-nocookie.com/*
 // @run-at       document-start
-// @grant        none
+// @grant        GM_getValue
+// @grant        GM_setValue
+// @grant        GM_addStyle
+// @grant        GM_registerMenuCommand
 // @downloadURL  https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/youtube-to-invidious.user.js
 // @updateURL    https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/youtube-to-invidious.user.js
 // ==/UserScript==
@@ -22,6 +25,158 @@
 
 (function() {
     'use strict';
+
+    // =========================================================================
+    // SHARED SETTINGS & STORAGE
+    // Present (with per-script keys) in every redirect script in this repo.
+    // =========================================================================
+
+    // Storage for settings and caches. Prefers the userscript manager's
+    // synchronous GM_getValue/GM_setValue (readable at document-start, per the
+    // @grant lines above, and they survive script auto-updates). Falls back to
+    // localStorage when GM storage isn't available (e.g. Brave scriptlets) — in
+    // that case persisted values only apply on the domains this script runs on.
+    var canStore = (typeof GM_getValue === 'function' && typeof GM_setValue === 'function');
+    function storeGet(key, def) {
+        try {
+            if (canStore) { var v = GM_getValue(key); return (v === undefined || v === null) ? def : v; }
+            var raw = localStorage.getItem('us:' + key);
+            return raw == null ? def : JSON.parse(raw);
+        } catch (e) { return def; }
+    }
+    function storeSet(key, val) {
+        try {
+            if (canStore) { GM_setValue(key, val); return; }
+            localStorage.setItem('us:' + key, JSON.stringify(val));
+        } catch (e) { /* storage unavailable — keep in-memory */ }
+    }
+
+    // Inject CSS. Uses GM_addStyle (immune to page CSP) when available,
+    // otherwise appends a <style> element.
+    function addCSS(css) {
+        if (typeof GM_addStyle === 'function') { try { GM_addStyle(css); return; } catch (e) {} }
+        var s = document.createElement('style');
+        s.textContent = css;
+        (document.head || document.documentElement).appendChild(s);
+    }
+
+    // Insert the settings panel's CSS once the <head> exists.
+    function whenHead(fn) {
+        if (document.head) { fn(); return; }
+        var mo = new MutationObserver(function() {
+            if (document.head) { mo.disconnect(); fn(); }
+        });
+        mo.observe(document.documentElement, { childList: true, subtree: true });
+        document.addEventListener('DOMContentLoaded', function() { mo.disconnect(); fn(); }, { once: true });
+    }
+
+    // Register a userscript-manager menu command, bridging GM (sync v3 API)
+    // and the GM.* / window.GM async variants.
+    function registerMenu(label, fn) {
+        try {
+            if (typeof GM_registerMenuCommand === 'function') { GM_registerMenuCommand(label, fn); return; }
+        } catch (e) {}
+        try {
+            if (typeof GM !== 'undefined' && GM && typeof GM.registerMenuCommand === 'function') { GM.registerMenuCommand(label, fn); return; }
+        } catch (e) {}
+        try {
+            if (typeof window !== 'undefined' && window.GM && typeof window.GM.registerMenuCommand === 'function') { window.GM.registerMenuCommand(label, fn); return; }
+        } catch (e) {}
+    }
+
+    // The in-page settings panel, injected on front-end instances (where this
+    // script also runs). Provides an enable/disable toggle plus any
+    // script-specific fields supplied by the caller.
+    //   opts: { title, fields:[{key,label,placeholder,value}], onSave }
+    function buildSettingsPanel(opts) {
+        addCSS(
+            '#us314-fab{position:fixed;bottom:24px;right:24px;z-index:2147483646;width:46px;height:46px;border-radius:50%;background:#222;color:#fff;border:1px solid #444;font-size:20px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.4);line-height:1;}' +
+            '#us314-panel{position:fixed;bottom:82px;right:24px;z-index:2147483646;width:300px;background:#fff;color:#222;border:1px solid #ccc;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.35);font-family:sans-serif;padding:14px;}' +
+            '#us314-panel h3{margin:0 0 10px;font-size:15px;}' +
+            '#us314-panel label{display:block;font-size:12px;margin:8px 0 2px;color:#555;}' +
+            '#us314-panel input[type=text]{width:100%;box-sizing:border-box;padding:6px;border:1px solid #bbb;border-radius:4px;font-size:13px;}' +
+            '#us314-panel .row{display:flex;align-items:center;gap:8px;margin:8px 0;}' +
+            '#us314-panel .btns{margin-top:12px;text-align:right;}' +
+            '#us314-panel button{padding:6px 12px;border:0;border-radius:4px;cursor:pointer;font-size:13px;}' +
+            '#us314-save{background:#336699;color:#fff;}' +
+            '#us314-note{font-size:11px;color:#888;margin-top:10px;}'
+        );
+        var fab = document.createElement('button');
+        fab.id = 'us314-fab';
+        fab.title = 'Script settings';
+        fab.textContent = '⚙';
+        var panel = document.createElement('div');
+        panel.id = 'us314-panel';
+        panel.style.display = 'none';
+        var h = document.createElement('h3');
+        h.textContent = opts.title;
+        panel.appendChild(h);
+
+        // Enable/disable toggle
+        var row = document.createElement('div');
+        row.className = 'row';
+        var chk = document.createElement('input');
+        chk.type = 'checkbox';
+        chk.id = 'us314-enabled';
+        chk.checked = isEnabled();
+        var chkLbl = document.createElement('label');
+        chkLbl.setAttribute('for', 'us314-enabled');
+        chkLbl.textContent = 'Enable redirect';
+        chkLbl.style.margin = '0';
+        row.appendChild(chk);
+        row.appendChild(chkLbl);
+        panel.appendChild(row);
+
+        // Script-specific fields
+        (opts.fields || []).forEach(function(f) {
+            var lbl = document.createElement('label');
+            lbl.textContent = f.label;
+            panel.appendChild(lbl);
+            var inp = document.createElement('input');
+            inp.type = 'text';
+            inp.id = 'us314-f-' + f.key;
+            inp.placeholder = f.placeholder || '';
+            inp.value = f.value;
+            panel.appendChild(inp);
+        });
+
+        var note = document.createElement('div');
+        note.id = 'us314-note';
+        note.textContent = 'Saved instantly; applies to future pages.';
+        panel.appendChild(note);
+
+        var btns = document.createElement('div');
+        btns.className = 'btns';
+        var save = document.createElement('button');
+        save.id = 'us314-save';
+        save.textContent = 'Save';
+        btns.appendChild(save);
+        panel.appendChild(btns);
+
+        (document.body || document.documentElement).appendChild(fab);
+        (document.body || document.documentElement).appendChild(panel);
+
+        fab.addEventListener('click', function() {
+            panel.style.display = (panel.style.display === 'none') ? 'block' : 'none';
+        });
+        save.addEventListener('click', function() {
+            storeSet(ENABLED_KEY, chk.checked);
+            var values = {};
+            (opts.fields || []).forEach(function(f) {
+                var inp = document.getElementById('us314-f-' + f.key);
+                values[f.key] = inp ? inp.value.trim() : '';
+            });
+            if (opts.onSave) opts.onSave(values, chk.checked);
+            note.textContent = 'Saved. Applies to future pages.';
+            setTimeout(function() { panel.style.display = 'none'; }, 250);
+        });
+    }
+
+    // The master on/off switch for this script. When false, the script does
+    // nothing (no redirect) and the settings panel is still shown so it can be
+    // re-enabled. Persisted in storage so it survives updates.
+    var ENABLED_KEY = 'yt.simple.enabled';
+    function isEnabled() { return !!storeGet(ENABLED_KEY, true); }
 
     // --- CONFIGURATION ---
     // Replace this with your preferred Invidious instance
@@ -53,10 +208,58 @@
         invidious = 'https://inv.nadeko.net';
     }
 
+    // Optional user override (set via the settings panel on the Invidious
+    // instance). Validated the same way as the in-file default; if it's
+    // non-empty and a valid http(s) URL it takes precedence and becomes the
+    // redirect target. Malformed or blank values are ignored, leaving the
+    // validated default above in effect.
+    try {
+        var storedInstance = storeGet('yt.simple.instance', '');
+        if (storedInstance) {
+            var parsedOverride = new URL(storedInstance);
+            if (parsedOverride.protocol === 'https:' || parsedOverride.protocol === 'http:') {
+                invidious = 'https://' + parsedOverride.host; // force https, drop any path/query
+            }
+        }
+    } catch (e) { /* ignore malformed override — keep the in-file default */ }
+
+    // --- GUARD: one-time bypass ---
+    // Appending "#noredirect" to a YouTube URL skips the redirect for that
+    // navigation only (the fragment isn't sent to the server and doesn't
+    // survive the redirect). Use it as an escape hatch to reach YouTube itself.
+    var bypass = /(?:^|[#&])noredirect(?:[=&]|$)/.test(window.location.hash || '');
+    if (bypass) {
+        try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {}
+        return; // Skip the whole redirect for this visit
+    }
+
+    // --- GUARD: script disabled via the settings panel ---
+    var enabled = !!storeGet(ENABLED_KEY, true);
+
     // --- GUARD: Don't redirect if we're already on the Invidious instance ---
+    // The settings panel is shown here regardless of the enabled flag, so a
+    // disabled script can always be re-enabled from the instance itself.
     if (window.location.hostname === new URL(invidious).hostname) {
+        whenHead(function() {
+            buildSettingsPanel({
+                title: 'YouTube → Invidious',
+                fields: [
+                    { key: 'instance', label: 'Invidious instance:', placeholder: 'https://inv.example.com', value: storeGet('yt.simple.instance', invidious) }
+                ],
+                onSave: function(v) {
+                    storeSet('yt.simple.instance', v.instance);
+                }
+            });
+        });
         return;
     }
+
+    // If the script is disabled via the settings panel, stop here (after the
+    // on-instance panel guard above so re-enabling stays possible).
+    if (!enabled) return;
+
+    // Register a menu command to note where the settings panel lives.
+    registerMenu('YouTube → Invidious settings', function() { /* panel lives on the instance */ });
 
     // --- GUARD: Don't redirect if we're inside an iframe ---
     if (window.self !== window.top) {

@@ -1,9 +1,17 @@
 # 314Block Userscripts — Comprehensive Review
 
-Date: 2026-06-09
+Date: 2026-06-09 (findings); follow-up changes applied 2026-08-21.
 
 A thorough review of all 7 userscripts covering stability, performance,
 usability, security, and code quality.
+
+> **Status (2026-08-21):** All six priority changes are applied, plus:
+> reachability probes + fallback pages on all redirect scripts (including
+> Medium→Scribe), update-proof config + enable/disable via an in-page settings
+> panel, a `#noredirect` per-visit bypass, auto-updating Redlib instance list,
+> a HN collapse-all button, an optional HN "hide visited stories" mode, and a
+> GitHub Action (`/.github/workflows/lint.yml`) that runs `node --check` and a
+> metadata-header lint to keep these regressions from recurring.
 
 ---
 

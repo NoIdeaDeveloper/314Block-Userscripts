@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Hacker News — Dark Mode & Reddit-Style Comments
 // @namespace    https://github.com/NoIdeaDeveloper/314Block-Userscripts
-// @version      2.2
-// @description  Dark mode, colour-coded comment threads, new-comment highlighting, OP/reply highlighting, keyboard navigation, collapsible threads, a sticky header, visited-story dimming, and a settings panel for Hacker News
+// @version      2.3
+// @description  Dark mode, colour-coded comment threads, new-comment highlighting, OP/reply highlighting, keyboard navigation, collapsible threads with a collapse-all control, a sticky header, visited-story dimming or hiding, and a settings panel for Hacker News
 // @author       NoIdeaDeveloper
 // @license      MIT
 // @match        *://news.ycombinator.com/*
@@ -36,6 +36,7 @@
         navButton:    true,   // floating next-parent button
         stickyHeader: true,   // sticky story title while scrolling comments
         visitedDim:   true,   // dim stories you've already visited
+        hideVisited:  false,  // hide visited stories entirely (takes precedence over dimming)
         fontSize:     14,     // base font size (px) for titles and comment text
         lineHeight:   1.4,    // comment text line height
         width:        0       // content max-width (px); 0 = native HN width
@@ -91,6 +92,7 @@
         setClass('hn-navbutton',    s.navButton);
         setClass('hn-stickyheader', s.stickyHeader);
         setClass('hn-visiteddim',   s.visitedDim);
+        setClass('hn-hidevisited',  s.hideVisited);
         if (prefStyle) prefStyle.textContent = prefsCSS(s);
     }
 
@@ -266,6 +268,17 @@
 
         /* === VISITED-STORY DIMMING (html.hn-visiteddim) ===================== */
         html.hn-visiteddim tr.athing.hn-visited .titleline > a { opacity: 0.5; }
+
+        /* === VISITED-STORY HIDING (html.hn-hidevisited) ===================== */
+        /* Alternative to dimming: remove visited stories (title, subtext and
+           spacer rows) from the list entirely. display:none wins over the dim
+           rule above, so enabling both is safe — hide takes precedence. */
+        html.hn-hidevisited tr.athing.hn-visited,
+        html.hn-hidevisited tr.athing.hn-visited + tr,
+        html.hn-hidevisited tr.athing.hn-visited + tr + tr { display: none !important; }
+
+        /* === COLLAPSE-ALL BUTTON (lives in the comment sort bar) ============ */
+        #hn-collapse-all-btn { margin-left: auto; }
 
         /* === COMMENT SORT BAR (html.hn-sortbar) ============================= */
         #hn-sort-bar {
@@ -676,6 +689,50 @@
 
 
     // =========================================================================
+    // COLLAPSE / EXPAND ALL
+    // Reuses HN's own per-comment toggle links (a.togg) — the exact mechanism
+    // the per-comment `c` keyboard shortcut clicks — so collapse-all and
+    // per-comment collapse never disagree about what "collapsed" means.
+    // =========================================================================
+    function setAllCollapsed(collapse) {
+        Array.from(document.querySelectorAll('.comtr a.togg')).forEach(function (togg) {
+            // HN renders toggles as "[–]" when expanded and "[+N]" when
+            // collapsed; only click the ones that need to change state.
+            var isCollapsed = togg.textContent.indexOf('+') !== -1;
+            if (isCollapsed !== collapse) togg.click();
+        });
+    }
+
+    // Appended to the sort bar, so it exists only on item pages (where
+    // comments — and the sort bar — exist). The label tracks live state so it
+    // stays correct even after per-comment `c` toggles or thread re-sorts.
+    function initCollapseAll(sortBar) {
+        var btn = document.createElement('button');
+        btn.id = 'hn-collapse-all-btn';
+        btn.className = 'hn-sort-btn';
+
+        function anyExpanded() {
+            var toggs = document.querySelectorAll('.comtr a.togg');
+            for (var i = 0; i < toggs.length; i++) {
+                if (toggs[i].textContent.indexOf('–') !== -1) return true;
+            }
+            return false;
+        }
+        function syncLabel() {
+            btn.textContent = anyExpanded() ? 'Collapse all' : 'Expand all';
+        }
+        btn.addEventListener('click', function () {
+            setAllCollapsed(anyExpanded());
+            syncLabel();
+            btn.blur(); // release focus so j/k keyboard nav keeps working
+        });
+
+        syncLabel();
+        sortBar.appendChild(btn);
+    }
+
+
+    // =========================================================================
     // STICKY STORY HEADER
     // =========================================================================
     function initStickyHeader(newCount) {
@@ -823,6 +880,8 @@
 
             sortBar.appendChild(btn);
         });
+
+        initCollapseAll(sortBar);
 
         sortBarCell.appendChild(sortBar);
         sortBarRow.appendChild(sortBarCell);
@@ -1001,7 +1060,8 @@
             ['sortBar',      'Comment sort bar'],
             ['navButton',    'Floating next-parent button'],
             ['stickyHeader', 'Sticky story header'],
-            ['visitedDim',   'Dim visited stories']
+            ['visitedDim',   'Dim visited stories'],
+            ['hideVisited',  'Hide visited stories (instead of dimming)']
         ];
         toggles.forEach(function (t) {
             var label = document.createElement('label');

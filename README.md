@@ -35,8 +35,12 @@ Shields to be enabled on the target site.
 > **Naming:** files prefixed `user-` are the **full-featured** versions.
 > The shorter `reddit-to-redlib.user.js` / `youtube-to-invidious.user.js`
 > files are **simpler** fallbacks. All installable files end in `.user.js`.
+>
+> **One-click install:** with a userscript manager installed, click any
+> **Install** link below — your manager detects the `==UserScript==` header and
+> offers to install it.
 
-### user-reddit-to-redlib.user.js (Recommended)
+### user-reddit-to-redlib.user.js (Recommended) — [Install](https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/user-reddit-to-redlib.user.js)
 
 **Description**: Redirects all Reddit pages to a randomly selected, **reachable**
 Redlib instance, preserving the full URL path and query parameters. Strips
@@ -56,7 +60,7 @@ tracking parameters before redirecting.
 **Configuration**: Edit the `INSTANCES` array to add or remove instances. A list
 of public instances is at [github.com/redlib-org/redlib-instances](https://github.com/redlib-org/redlib-instances).
 
-### reddit-to-redlib.user.js (Simple)
+### reddit-to-redlib.user.js (Simple) — [Install](https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/reddit-to-redlib.user.js)
 
 > The single-instance version. For random selection and automatic failover
 > across instances, use `user-reddit-to-redlib.user.js` instead.
@@ -66,7 +70,7 @@ preserving the URL path and query parameters. Probes the instance before
 redirecting and shows a fallback page if it's down. Edit the `destination`
 variable to choose your instance.
 
-### user-youtube-to-invidious.user.js (Recommended)
+### user-youtube-to-invidious.user.js (Recommended) — [Install](https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/user-youtube-to-invidious.user.js)
 
 **Description**: Redirects YouTube to a configured Invidious instance, preserving
 video IDs, timestamps, search queries, and playlists. Replaces YouTube embeds
@@ -86,7 +90,7 @@ tab results.
 **Configuration**: Change the `invidious` variable to your preferred instance.
 A list of public instances is at [api.invidious.io](https://api.invidious.io).
 
-### youtube-to-invidious.user.js (Simple)
+### youtube-to-invidious.user.js (Simple) — [Install](https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/youtube-to-invidious.user.js)
 
 > The simpler, older version. For embed replacement, DuckDuckGo integration,
 > and SPA navigation handling, use `user-youtube-to-invidious.user.js`.
@@ -95,7 +99,7 @@ A list of public instances is at [api.invidious.io](https://api.invidious.io).
 YouTube URL types. Probes the instance before redirecting and shows a fallback
 page if it's down. Set `invidious`, `videoParams`, and `pageParams` to taste.
 
-### user-medium-to-scribe.user.js
+### user-medium-to-scribe.user.js — [Install](https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/user-medium-to-scribe.user.js)
 
 **Description**: Redirects Medium articles to Scribe (scribe.rip), preserving the
 URL path. Strips tracking parameters and handles SPA navigation.
@@ -107,7 +111,7 @@ URL path. Strips tracking parameters and handles SPA navigation.
 - Matches `*.medium.com` subdomain publications as well as `medium.com`
 - Configured Scribe instance is validated and forced to HTTPS
 
-### hackernews-dark-mode.user.js
+### hackernews-dark-mode.user.js — [Install](https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/hackernews-dark-mode.user.js)
 
 **Description**: Enhances the Hacker News reading experience with visual,
 navigational, and reading-state upgrades. Every feature can be toggled live from
@@ -130,18 +134,46 @@ an in-page settings panel (the ⚙ button, bottom-right).
   per-comment scores, in its HTML or its APIs.)*
 - **Sticky story header**: keeps the title (and a "top" jump) in view while you
   read deep threads.
+- **Collapse-all / expand-all**: one click in the sort bar collapses or expands
+  every top-level comment thread at once.
 - **Visited-story dimming**: stories you've already opened are dimmed on the
-  front page and other listings, persisted across sessions.
+  front page and other listings, persisted across sessions. An optional
+  "Hide visited stories" setting removes them from listings entirely instead.
 - **Reading controls**: adjustable font size, line height, and content width.
 - **Next-parent button**: a floating button to skip to the next top-level comment.
 
 All state (settings, visited stories, per-thread last-visit timestamps) is stored
 locally in your browser via `localStorage`; nothing is sent anywhere.
 
-### tophn-co-element-removal.user.js
+### tophn-co-element-removal.user.js — [Install](https://raw.githubusercontent.com/NoIdeaDeveloper/314Block-Userscripts/main/tophn-co-element-removal.user.js)
 
 **Description**: Removes specific UI elements from TopHN.co using DOM observation
 and polling (debounced to one pass per animation frame).
+
+## Shared features (all redirect scripts)
+
+The five redirect scripts (`reddit-to-redlib`, `user-reddit-to-redlib`,
+`youtube-to-invidious`, `user-youtube-to-invidious`, `user-medium-to-scribe`)
+share these behaviors:
+
+- **Reachability probe** — before navigating away, the target instance is
+  probed; if it's down you get a clear fallback page instead of a browser error.
+- **Update-proof configuration** — change the target instance and toggle the
+  script on/off from a ⚙ settings panel shown on the front-end instance (e.g. on
+  the Redlib/Invidious/Scribe page itself). Settings are saved in your
+  userscript manager's storage, so they survive script auto-updates.
+  (In Brave scriptlets they fall back to `localStorage`, applying per-domain.)
+- **Per-visit bypass** — append `#noredirect` to a URL to skip the redirect for
+  that one navigation (the fragment is never sent to any server).
+- **Enable/disable toggle** — turn a script off from its settings panel (or the
+  manager's menu command) without uninstalling it.
+
+`user-reddit-to-redlib.user.js` additionally **auto-updates its Redlib instance
+list** from the official
+[instances.json](https://github.com/redlib-org/redlib-instances) every few days,
+caching it locally and falling back to the embedded list if the fetch fails.
+This can be turned off in that script's settings panel (it makes a periodic
+request to GitHub).
 
 ## Notes
 

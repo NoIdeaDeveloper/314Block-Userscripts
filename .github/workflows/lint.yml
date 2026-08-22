@@ -1,0 +1,53 @@
+name: Lint userscripts
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Syntax-check every userscript
+        run: |
+          set -e
+          for f in *.user.js; do
+            echo "node --check $f"
+            node --check "$f"
+          done
+
+      - name: Lint required metadata headers
+        run: |
+          set -e
+          REQUIRED="@name @namespace @version @description @author @license @match @run-at @grant @downloadURL @updateURL"
+          missing=0
+          for f in *.user.js; do
+            for tag in $REQUIRED; do
+              # match the tag allowing run-of-whitespace after //
+              if ! grep -Eq "^//[[:space:]]+$tag[[:space:]]" "$f"; then
+                echo "MISSING: $f -> $tag"
+                missing=1
+              fi
+            done
+            # author/namespace/license must be the repo's, not placeholder values
+            if grep -Eq "@author[[:space:]]+You([[:space:]]|$)" "$f"; then
+              echo "BAD @author (placeholder) in $f"; missing=1
+            fi
+            if grep -q "@namespace    http://tampermonkey.net/" "$f"; then
+              echo "BAD @namespace (placeholder) in $f"; missing=1
+            fi
+            if ! grep -Eq "@license[[:space:]]+MIT" "$f"; then
+              echo "MISSING/BAD @license MIT in $f"; missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "Header lint failed."; exit 1
+          fi
+          echo "All headers OK."
